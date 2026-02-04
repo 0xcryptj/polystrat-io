@@ -1,0 +1,12 @@
+# Node
+node_modules/
+
+# Local env (never commit)
+.env
+.env.*
+apps/web/.env.local
+apps/api/.env.local
+
+# Logs / misc
+*.log
+moltbook_register_*.txt

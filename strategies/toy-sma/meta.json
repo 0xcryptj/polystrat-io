@@ -1,0 +1,38 @@
+{
+  "id": "toy-sma-cross",
+  "name": "Toy SMA Crossover (Paper)",
+  "author": "Upstream Example",
+  "license": "MIT",
+  "sourceUrl": "https://github.com/example/toy-sma (vendored)",
+  "tags": ["toy", "paper", "sma"],
+  "uiHints": {
+    "groupOrder": ["market", "risk", "signal"],
+    "groups": {
+      "market": { "title": "Market", "description": "Data source" },
+      "signal": { "title": "Signal", "description": "SMA crossover parameters" },
+      "risk": { "title": "Risk", "description": "Paper trade sizing" }
+    }
+  },
+  "paramsSchema": {
+    "fields": [
+      { "key": "marketId", "label": "Market Slug", "type": "string", "default": "will-trump-deport-less-than-250000" },
+      {
+        "key": "provider",
+        "label": "Data Provider",
+        "type": "select",
+        "default": "polymarket",
+        "options": [
+          { "label": "Polymarket (public)", "value": "polymarket" },
+          { "label": "Mock", "value": "mock" }
+        ]
+      },
+      { "key": "pollMs", "label": "Poll interval (ms)", "type": "number", "default": 2500, "min": 500, "step": 250 },
+
+      { "key": "fast", "label": "Fast SMA", "type": "number", "default": 5, "min": 2, "step": 1 },
+      { "key": "slow", "label": "Slow SMA", "type": "number", "default": 15, "min": 3, "step": 1 },
+      { "key": "threshold", "label": "Signal threshold", "type": "number", "default": 0.003, "min": 0.0005, "step": 0.0005 },
+
+      { "key": "paperSize", "label": "Paper size", "type": "number", "default": 5, "min": 0.01, "step": 0.01 }
+    ]
+  }
+}

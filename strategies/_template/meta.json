@@ -1,0 +1,24 @@
+{
+  "id": "example-upstream-strategy",
+  "name": "Example Upstream Strategy (Paper)",
+  "author": "Upstream Author",
+  "license": "MIT",
+  "sourceUrl": "https://github.com/<org>/<repo>",
+  "categories": ["demo"],
+  "paramsSchema": {
+    "fields": [
+      { "key": "marketId", "label": "Market ID", "type": "string", "default": "" },
+      {
+        "key": "provider",
+        "label": "Data Provider",
+        "type": "select",
+        "default": "mock",
+        "options": [
+          { "label": "Mock", "value": "mock" },
+          { "label": "Polymarket (public, read-only)", "value": "polymarket" }
+        ]
+      },
+      { "key": "pollMs", "label": "Poll interval (ms)", "type": "number", "default": 2500, "min": 500, "step": 250 }
+    ]
+  }
+}
