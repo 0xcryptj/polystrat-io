@@ -28,6 +28,31 @@ export class FileBackedEventStore {
   }
 }
 
+const API_BASE_URL = process.env.API_BASE_URL ?? "http://127.0.0.1:3399";
+const DEV_USER_ID = process.env.DEV_USER_ID ?? "dev-user-1";
+
+async function postEventToApi(event: StrategyEvent) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 600);
+  try {
+    await fetch(`${API_BASE_URL}/events/ingest`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        runId: event.runId,
+        strategyId: event.strategyId,
+        userId: DEV_USER_ID,
+        event
+      }),
+      signal: ctrl.signal
+    });
+  } catch {
+    // API is optional in dev; swallow errors.
+  } finally {
+    clearTimeout(t);
+  }
+}
+
 export function createContext(params: {
   strategyId: string;
   runId: string;
@@ -43,7 +68,12 @@ export function createContext(params: {
         strategyId: params.strategyId,
         runId: params.runId
       } as StrategyEvent;
+
+      // always keep local store
       params.store.append(event);
+
+      // best-effort API forward
+      void postEventToApi(event);
     }
   };
 }
