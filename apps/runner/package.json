@@ -1,0 +1,12 @@
+{
+  "name": "@polystrat/runner",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --enable-source-maps src/server.ts"
+  },
+  "dependencies": {
+    "@polystrat/strategy-sdk": "*"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "name": "polystrat",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "lint": "echo \"TODO\"",
+    "typecheck": "echo \"TODO\""
+  }
+}
