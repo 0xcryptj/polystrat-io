@@ -1,0 +1,206 @@
+.page {
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  padding: 16px;
+  color: #111;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.title {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.subtitle {
+  font-size: 12px;
+  color: #555;
+}
+
+.error {
+  max-width: 520px;
+  padding: 10px 12px;
+  border: 1px solid #ffb3b3;
+  background: #fff3f3;
+  color: #8a0000;
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 320px 360px 1fr;
+  gap: 12px;
+}
+
+.panel {
+  border: 1px solid #e5e5e5;
+  border-radius: 10px;
+  padding: 12px;
+  background: #fff;
+}
+
+.panel h2 {
+  margin: 0 0 10px;
+  font-size: 14px;
+}
+
+.strategyList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.strategyItem {
+  text-align: left;
+  border: 1px solid #e5e5e5;
+  border-radius: 10px;
+  padding: 10px;
+  background: #fafafa;
+  cursor: pointer;
+}
+
+.strategyItem.active {
+  border-color: #7aa7ff;
+  background: #f2f7ff;
+}
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.name {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.desc {
+  font-size: 12px;
+  color: #444;
+  margin-top: 6px;
+}
+
+.badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid #ddd;
+  background: #fff;
+}
+
+.badge.running {
+  border-color: #86d993;
+  background: #eaffee;
+}
+
+.badge.stopped {
+  border-color: #ddd;
+  background: #fff;
+}
+
+.badge.error {
+  border-color: #ffb3b3;
+  background: #fff3f3;
+}
+
+.form {
+  display: grid;
+  gap: 10px;
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+}
+
+.label {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+input[type="text"],
+input[type="number"],
+select {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #ddd;
+  font-size: 13px;
+}
+
+.controls {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.btn {
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid #ddd;
+  background: #111;
+  color: #fff;
+  cursor: pointer;
+}
+
+.logs .logList {
+  max-height: 70vh;
+  overflow: auto;
+  border: 1px solid #eee;
+  border-radius: 10px;
+}
+
+.logRow {
+  display: grid;
+  grid-template-columns: 90px 90px 1fr;
+  gap: 10px;
+  padding: 10px;
+  border-bottom: 1px solid #eee;
+}
+
+.logRow:last-child {
+  border-bottom: none;
+}
+
+.logRow.signal {
+  background: #f6fbff;
+}
+
+.logRow.paperTrade {
+  background: #f7fff6;
+}
+
+.logRow.error {
+  background: #fff3f3;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+.small {
+  font-size: 11px;
+}
+
+.muted {
+  color: #666;
+}
+
+.footer {
+  margin-top: 14px;
+  font-size: 12px;
+  color: #666;
+}
+
+@media (max-width: 1100px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}

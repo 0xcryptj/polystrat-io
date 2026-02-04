@@ -1,10 +1,10 @@
 import http from "node:http";
 import crypto from "node:crypto";
-import { makeDummyStrategy, FileBackedEventStore, createContext, RunnerStatus } from "./index.js";
+import { makeToyStrategy, FileBackedEventStore, createContext, RunnerStatus } from "./index";
 
 const PORT = Number(process.env.PORT ?? 3344);
 
-const strategy = makeDummyStrategy();
+const strategy = makeToyStrategy();
 const store = new FileBackedEventStore("data/events.jsonl");
 
 let status: RunnerStatus = { runState: "stopped" };
@@ -31,7 +31,12 @@ async function start(config: any) {
   tickTimer = setInterval(async () => {
     try {
       const tickCtx = createContext({ strategyId: strategy.meta.id, runId: status.runId!, store });
-      await strategy.onTick(tickCtx, { marketId: config?.marketId ?? "TEST-MARKET", t: Date.now() });
+      await strategy.onTick(tickCtx, {
+        marketId: config?.marketId ?? "TEST-MARKET",
+        jumpThreshold: config?.jumpThreshold,
+        size: config?.size,
+        t: Date.now()
+      });
     } catch (err: any) {
       const errCtx = createContext({ strategyId: strategy.meta.id, runId: status.runId!, store });
       errCtx.emit({ type: "error", message: String(err?.message ?? err), stack: err?.stack });
@@ -76,7 +81,13 @@ const server = http.createServer(async (req, res) => {
     let body = "";
     req.on("data", (c) => (body += c));
     req.on("end", async () => {
-      const config = body ? JSON.parse(body) : {};
+      let config: any = {};
+      try {
+        config = body ? JSON.parse(body) : {};
+      } catch {
+        return json(res, 400, { ok: false, error: "bad_json" });
+      }
+
       await start(config);
       return json(res, 200, { ok: true, status });
     });

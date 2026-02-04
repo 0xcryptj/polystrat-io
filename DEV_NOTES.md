@@ -3,30 +3,41 @@
 ## Repo layout
 - `packages/strategy-sdk` — strategy interfaces + event types
 - `apps/runner` — local runner + HTTP API (paper mode)
-- `apps/web` — dashboard (later: real UI)
+- `apps/web` — Vite + React + TS dashboard
 - `strategies/` — future: ingested upstream strategies + adapters
 
-## How to run (later, after deps are installed)
-> We are not installing dependencies yet. These commands will work once we add deps.
-
-### Runner
+## Install
 ```powershell
-cd apps/runner
+cd $env:USERPROFILE\OneDrive\Desktop\polystrat.io
+npm install
+```
+
+## Run (2 terminals)
+> Start runner first, then web.
+
+### Terminal 1 — Runner
+```powershell
+cd $env:USERPROFILE\OneDrive\Desktop\polystrat.io\apps\runner
 npm run dev
 ```
 
-### Web
+Runner default: `http://localhost:3344`
+
+### Terminal 2 — Web
 ```powershell
-cd apps/web
+cd $env:USERPROFILE\OneDrive\Desktop\polystrat.io\apps\web
 npm run dev
 ```
+
+Open the URL Vite prints (usually `http://localhost:5173`).
 
 ## Local API (runner)
 - `GET /strategies`
 - `POST /strategies/:id/start`
 - `POST /strategies/:id/stop`
-- `GET /logs`
+- `GET /logs?limit=200`
 
 ## Notes
 - Paper-mode only.
 - No secrets in this repo. Use `.env.example` placeholders only.
+- Runner writes local events to `apps/runner/data/events.jsonl` (gitignored).

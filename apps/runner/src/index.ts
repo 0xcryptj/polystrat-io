@@ -48,35 +48,95 @@ export function createContext(params: {
   };
 }
 
-export function makeDummyStrategy(): Strategy<{ marketId: string; tickMs: number }> {
+export function makeToyStrategy(): Strategy<{
+  marketId: string;
+  tickMs: number;
+  jumpThreshold: number;
+  basePrice: number;
+  size: number;
+}> {
+  // Random-walk state (kept in-memory per runner process)
+  let lastPrice = 0.5;
+  let lastDelta = 0;
+
   return {
     meta: {
-      id: "dummy-mean-reversion",
-      name: "Dummy Mean Reversion (Paper)",
-      description: "Emits fake signals and paper trades on a timer."
+      id: "toy-random-walk",
+      name: "Toy Random Walk (Paper)",
+      description: "Generates a fake price series, emits signals on jumps, and places paper trades."
     },
     configSchema: {
       fields: [
         { key: "marketId", label: "Market ID", type: "string", default: "TEST-MARKET" },
-        { key: "tickMs", label: "Tick Interval (ms)", type: "number", default: 1000, min: 200, step: 50 }
+        { key: "tickMs", label: "Tick Interval (ms)", type: "number", default: 2000, min: 500, step: 100 },
+        {
+          key: "jumpThreshold",
+          label: "Jump Threshold (abs Δ)",
+          type: "number",
+          default: 0.06,
+          min: 0.001,
+          max: 1,
+          step: 0.001
+        },
+        { key: "basePrice", label: "Start Price", type: "number", default: 0.5, min: 0.01, max: 0.99, step: 0.01 },
+        { key: "size", label: "Paper Size", type: "number", default: 5, min: 0.01, step: 0.01 }
       ]
     },
     async start(ctx, config) {
+      lastPrice = clamp01(Number(config?.basePrice ?? 0.5));
+      lastDelta = 0;
       ctx.emit({ type: "log", level: "info", message: "strategy start", data: config });
     },
     async stop(ctx) {
       ctx.emit({ type: "log", level: "info", message: "strategy stop" });
     },
     async onTick(ctx, input) {
-      ctx.emit({ type: "signal", message: "mock: price spike detected", confidence: 0.62, data: input });
+      const marketId = String((input as any)?.marketId ?? "TEST-MARKET");
+      const jumpThreshold = Number((input as any)?.jumpThreshold ?? 0.06);
+      const size = Number((input as any)?.size ?? 5);
+
+      // Random walk: small noise + occasional jump
+      const noise = (Math.random() - 0.5) * 0.02; // [-0.01, 0.01]
+      const jump = Math.random() < 0.12 ? (Math.random() - 0.5) * 0.25 : 0; // occasional
+      const nextPrice = clamp01(lastPrice + noise + jump);
+
+      lastDelta = nextPrice - lastPrice;
+      lastPrice = nextPrice;
+
       ctx.emit({
-        type: "paperTrade",
-        marketId: (input as any)?.marketId ?? "TEST-MARKET",
-        side: Math.random() > 0.5 ? "buy" : "sell",
-        price: Number(((Math.random() * 0.5) + 0.25).toFixed(3)),
-        size: Number(((Math.random() * 10) + 1).toFixed(2)),
-        reason: "mock trade"
+        type: "log",
+        level: "info",
+        message: "tick",
+        data: { marketId, price: round3(lastPrice), delta: round3(lastDelta), t: Date.now() }
       });
+
+      if (Math.abs(lastDelta) >= jumpThreshold) {
+        const direction = lastDelta > 0 ? "up" : "down";
+        ctx.emit({
+          type: "signal",
+          message: `price jump ${direction} (|Δ|>=${jumpThreshold})`,
+          confidence: clamp01(Math.min(1, Math.abs(lastDelta) / (jumpThreshold * 2))),
+          data: { marketId, price: round3(lastPrice), delta: round3(lastDelta) }
+        });
+
+        ctx.emit({
+          type: "paperTrade",
+          marketId,
+          side: lastDelta > 0 ? "sell" : "buy",
+          price: round3(lastPrice),
+          size,
+          reason: "jump-threshold"
+        });
+      }
     }
   };
+}
+
+function clamp01(n: number) {
+  if (Number.isNaN(n)) return 0;
+  return Math.max(0, Math.min(1, n));
+}
+
+function round3(n: number) {
+  return Number(n.toFixed(3));
 }

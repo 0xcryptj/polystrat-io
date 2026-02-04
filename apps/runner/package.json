@@ -4,9 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node --enable-source-maps src/server.ts"
+    "dev": "tsx --watch src/server.ts"
   },
   "dependencies": {
     "@polystrat/strategy-sdk": "*"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.5"
   }
 }
