@@ -1,6 +1,8 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 
 const API_PORT = Number(process.env.PORT ?? 3399);
 const RUNNER_BASE_URL = process.env.RUNNER_BASE_URL ?? "http://localhost:3344";
@@ -15,6 +17,43 @@ type RunRecord = {
 };
 
 const runs = new Map<string, RunRecord>();
+
+type IngestEvent = {
+  id?: string;
+  ts?: number;
+  runId: string;
+  strategyId: string;
+  userId: string;
+  type: string;
+  [k: string]: any;
+};
+
+type EventRecord = Required<Pick<IngestEvent, "runId" | "strategyId" | "userId" | "type">> & {
+  id: string;
+  ts: number;
+  payload: any;
+};
+
+const EVENT_BUFFER_LIMIT = Number(process.env.EVENT_BUFFER_LIMIT ?? 2000);
+const EVENT_JSONL_PATH = process.env.EVENT_JSONL_PATH ?? "data/events.jsonl";
+
+const eventBuffer: EventRecord[] = [];
+
+function appendEvent(rec: EventRecord) {
+  eventBuffer.push(rec);
+  if (eventBuffer.length > EVENT_BUFFER_LIMIT) {
+    eventBuffer.splice(0, eventBuffer.length - EVENT_BUFFER_LIMIT);
+  }
+
+  // Optional append-only JSONL for dev
+  try {
+    const dir = path.dirname(EVENT_JSONL_PATH);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.appendFileSync(EVENT_JSONL_PATH, JSON.stringify(rec) + "\n", { encoding: "utf8" });
+  } catch {
+    // swallow
+  }
+}
 
 const app = Fastify({ logger: true });
 
@@ -97,10 +136,63 @@ app.post<{ Params: { id: string } }>("/strategies/:id/stop", async (request, rep
   return reply.code(out.status).send(out.json);
 });
 
-app.get<{ Querystring: { limit?: string } }>("/logs", async (request, reply) => {
-  const limit = request.query.limit ?? "200";
-  const out = await proxyJson({ method: "GET", path: `/logs?limit=${encodeURIComponent(limit)}` });
-  return reply.code(out.status).send(out.json);
+// ---- Events ingest (runner -> api) ----
+app.post<{
+  Body:
+    | { runId: string; strategyId: string; userId: string; events: any[] }
+    | { runId: string; strategyId: string; userId: string; event: any }
+    | any;
+}>("/events/ingest", async (request, reply) => {
+  const body: any = request.body ?? {};
+  const runId = body.runId;
+  const strategyId = body.strategyId;
+  const userId = body.userId ?? "dev-user-1";
+
+  const events: any[] = Array.isArray(body.events) ? body.events : body.event ? [body.event] : [];
+  if (!runId || !strategyId || events.length === 0) {
+    return reply.code(400).send({ ok: false, error: "missing_fields" });
+  }
+
+  for (const e of events) {
+    const rec: EventRecord = {
+      id: e?.id ?? crypto.randomUUID(),
+      ts: typeof e?.ts === "number" ? e.ts : Date.now(),
+      runId,
+      strategyId,
+      userId,
+      type: String(e?.type ?? "log"),
+      payload: e
+    };
+    appendEvent(rec);
+  }
+
+  return reply.code(200).send({ ok: true, ingested: events.length });
+});
+
+app.get<{ Querystring: { limit?: string; runId?: string } }>("/events", async (request) => {
+  const limit = Math.min(2000, Math.max(1, Number(request.query.limit ?? 200)));
+  const runId = request.query.runId;
+
+  const filtered = runId ? eventBuffer.filter((e) => e.runId === runId) : eventBuffer;
+  const events = filtered.slice(-limit);
+
+  return { events };
+});
+
+// Back-compat: /logs now aliases /events (web used to call /logs)
+app.get<{ Querystring: { limit?: string; runId?: string } }>("/logs", async (request) => {
+  const limit = Math.min(2000, Math.max(1, Number(request.query.limit ?? 200)));
+  const runId = request.query.runId;
+
+  const filtered = runId ? eventBuffer.filter((e) => e.runId === runId) : eventBuffer;
+  const events = filtered.slice(-limit).map((e) => e.payload);
+
+  return {
+    status: { runState: "running" },
+    strategyId: null,
+    runId: runId ?? null,
+    events
+  };
 });
 
 // ---- Runs (minimal in-memory; uses runner under the hood) ----

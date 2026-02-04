@@ -19,6 +19,9 @@ tmp/
 # runner local data
 apps/runner/data/
 
+# api local data
+apps/api/data/
+
 # === OS ===
 .DS_Store
 Thumbs.db
