@@ -61,3 +61,28 @@ npm -w apps/web run dev
 ## Notes
 - Paper-mode only.
 - No secrets in this repo. Use `.env.example` placeholders only.
+
+## Strategy packages (how strategies get into the website)
+
+Runner loads strategies from `./strategies/*` where each strategy has:
+- `meta.json`
+- `adapter.ts` exporting `export const strategy = ...`
+
+### Scaffold a new strategy package
+
+```bash
+node scripts/ingest-strategy.mjs \
+  --id polymarket-arb-signals \
+  --name "Polymarket Arbitrage Signals" \
+  --author "polystrat" \
+  --license "MIT" \
+  --source https://github.com/runesatsdev/polymarket-arbitrage-bot \
+  --commit <sha> \
+  --tags "polymarket,arbitrage,signals"
+```
+
+### QA gate (packaging safety)
+
+```bash
+npm -w apps/runner run qa:strategies
+```

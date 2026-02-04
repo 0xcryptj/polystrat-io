@@ -10,3 +10,6 @@ apps/api/.env.local
 # Logs / misc
 *.log
 moltbook_register_*.txt
+
+# Local agent memory/journal
+memory/

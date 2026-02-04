@@ -338,20 +338,8 @@ function chipMulti(options: string[], selected: Set<string>, onChange: (sel: Set
   return root;
 }
 
-function topbar(opts?: { email?: string | null; gateAllowed?: boolean | null }) {
+function appShell(opts: { email?: string | null; gateAllowed?: boolean | null }, content: Node) {
   const route = (location.hash || "#dashboard").replace("#", "");
-  const navBtn = (hash: string, label: string) =>
-    el(
-      "button",
-      {
-        className: `btn ${route === hash.replace("#", "") ? "primary" : ""}`,
-        onclick: () => {
-          location.hash = hash;
-          render();
-        }
-      },
-      label
-    );
 
   const gatePill =
     opts?.gateAllowed == null
@@ -360,48 +348,111 @@ function topbar(opts?: { email?: string | null; gateAllowed?: boolean | null }) 
         ? el("span", { className: "pill green" }, "Token Holder")
         : el("span", { className: "pill" }, "No Access");
 
-  const account = el(
-    "div",
-    { className: "row" },
-    gatePill,
-    opts?.email ? el("span", { className: "pill" }, opts.email) : el("span", { className: "pill" }, "signed out"),
-    el(
+  const titleMap: Record<string, string> = {
+    dashboard: "Strategies",
+    markets: "Markets",
+    analytics: "Analytics",
+    wallets: "Wallets",
+    traders: "Traders",
+    "bot-config": "Bot Config",
+    notifications: "Notifications",
+    credits: "Credits",
+    login: "Login",
+    "access-required": "Access Required"
+  };
+  const baseRoute = route.split("/")[0];
+  const title = titleMap[baseRoute] ?? "Polystrat";
+
+  const navItem = (hash: string, label: string, kind: Parameters<typeof icon>[0]) => {
+    const active = route === hash.replace("#", "") || route.startsWith(hash.replace("#", "") + "/");
+    return el(
       "button",
       {
-        className: "btn",
-        onclick: async () => {
-          await supabase.auth.signOut();
-          location.hash = "#login";
+        className: `navItem ${active ? "navItemOn" : ""}`,
+        onclick: () => {
+          location.hash = hash;
+          render();
         }
       },
-      "Sign out"
+      icon(kind),
+      el("span", {}, label)
+    );
+  };
+
+  const sidebar = el(
+    "aside",
+    { className: "sidebar" },
+    el(
+      "div",
+      { className: "sideBrand" },
+      el("div", { className: "sideLogo" }, "P"),
+      el("div", {},
+        el("div", { className: "sideTitle" }, "polystrat"),
+        el("div", { className: "muted" }, "paper-first platform")
+      )
+    ),
+    el("div", { className: "sideSection" },
+      navItem("#dashboard", "Strategies", "bot"),
+      navItem("#markets", "Markets", "chart"),
+      navItem("#analytics", "Analytics", "chart"),
+      navItem("#wallets", "Wallets", "sliders"),
+      navItem("#traders", "Traders", "book")
+    ),
+    el("div", { className: "sideSection" },
+      navItem("#bot-config", "Bot Config", "sliders"),
+      navItem("#notifications", "Notifications", "bell"),
+      navItem("#credits", "Credits", "book")
+    ),
+    el("div", { className: "sideFooter" },
+      el("div", { className: "row" },
+        el("span", { className: "pill" }, "SOL"),
+        el("span", { className: "pill green", title: "Execution is locked to paper mode" }, "Paper")
+      ),
+      el("div", { className: "row", style: "margin-top:10px" },
+        gatePill,
+        opts?.email ? el("span", { className: "pill" }, opts.email) : el("span", { className: "pill" }, "signed out")
+      ),
+      el(
+        "button",
+        {
+          className: "btn",
+          style: "margin-top:10px; width:100%",
+          onclick: async () => {
+            await supabase.auth.signOut();
+            location.hash = "#login";
+          }
+        },
+        "Sign out"
+      )
     )
   );
 
-  return el(
-    "div",
-    { className: "topbar" },
-    el(
-      "div",
-      { className: "brand" },
-      el("span", { className: "pill" }, "polystrat"),
-      el("span", { className: "pill green", title: "Execution is locked to paper mode" }, "Paper Mode"),
-      el("h1", {}, "Dashboard")
-    ),
-    el(
-      "div",
-      { className: "nav" },
-      navBtn("#dashboard", "Strategies"),
-      navBtn("#markets", "Markets"),
-      navBtn("#analytics", "Analytics"),
-      navBtn("#wallets", "Wallets"),
-      navBtn("#traders", "Traders"),
-      navBtn("#bot-config", "Bot Config"),
-      navBtn("#notifications", "Notifications"),
-      navBtn("#credits", "Credits")
-    ),
-    account
+  const header = el(
+    "header",
+    { className: "header" },
+    el("div", { className: "headerTitle" }, el("h1", {}, title), el("div", { className: "muted" }, "no terminals, no keys")),
+    el("div", { className: "row" },
+      el("input", {
+        className: "search",
+        type: "text",
+        placeholder: "Search markets, strategies…",
+        onkeydown: (e: KeyboardEvent) => {
+          if (e.key !== "Enter") return;
+          const q = (e.target as HTMLInputElement).value.trim();
+          if (!q) return;
+          // MVP: jump to markets and let user filter there later.
+          localStorage.setItem("lastSearch", q);
+          location.hash = "#markets";
+          render();
+        }
+      }),
+      el("span", { className: "pill" }, "MVP")
+    )
   );
+
+  const main = el("main", { className: "main" }, header, el("div", { className: "mainInner" }, content));
+
+  return el("div", { className: "appShell" }, sidebar, main);
 }
 
 async function renderDashboard() {
@@ -1441,8 +1492,8 @@ async function render() {
 
   // Routes that don't require auth
   if (route === "login") {
-    app.append(topbar({ email, gateAllowed: null }));
-    app.append(el("div", { style: "margin-top:10px" }, renderLogin(el)));
+    const content = el("div", {}, renderLogin(el));
+    app.append(appShell({ email, gateAllowed: null }, content));
     return;
   }
 
@@ -1451,8 +1502,8 @@ async function render() {
   const isProtected = protectedRoutes.some((p) => route === p || route.startsWith(p + "/"));
   if (isProtected && !session) {
     location.hash = "#login";
-    app.append(topbar({ email, gateAllowed: null }));
-    app.append(el("div", { style: "margin-top:10px" }, renderLogin(el)));
+    const content = el("div", {}, renderLogin(el));
+    app.append(appShell({ email, gateAllowed: null }, content));
     return;
   }
 
@@ -1469,15 +1520,13 @@ async function render() {
   }
 
   if (route === "access-required") {
-    app.append(topbar({ email, gateAllowed: allowed }));
-    app.append(el("div", { style: "margin-top:10px" }, renderAccessRequired(el, gate?.reason)));
+    const content = el("div", {}, renderAccessRequired(el, gate?.reason));
+    app.append(appShell({ email, gateAllowed: allowed }, content));
     return;
   }
 
-  app.append(topbar({ email, gateAllowed: allowed }));
-
-  const content = el("div", { style: "margin-top:10px" });
-  app.append(content);
+  const content = el("div", {});
+  app.append(appShell({ email, gateAllowed: allowed }, content));
 
   try {
     if (route === "bot-config") content.append(renderBotConfig());

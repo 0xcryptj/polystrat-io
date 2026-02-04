@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx --watch src/server.ts"
+    "dev": "tsx --watch src/server.ts",
+    "qa:strategies": "tsx src/strategies/qaHarness.ts"
   },
   "dependencies": {
     "@polystrat/strategy-sdk": "*"

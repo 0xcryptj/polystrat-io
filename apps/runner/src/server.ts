@@ -4,6 +4,7 @@ import type { MarketDataProvider, MarketSnapshot } from "./providers/types.js";
 import { MockMarketDataProvider } from "./providers/mock.js";
 import { PolymarketMarketDataProvider } from "./providers/polymarket.js";
 import { getStrategyRegistry } from "./strategies/registry.js";
+import { validateConfig } from "./strategies/configValidate.js";
 
 const PORT = Number(process.env.PORT ?? 3344);
 
@@ -49,17 +50,27 @@ function notFound(res: http.ServerResponse) {
 }
 
 async function start(strategyId: string, config: any) {
-  if (running?.status.runState === "running") return;
+  if (running?.status.runState === "running") return { ok: false, error: "already_running" };
 
   await ensureRegistry();
   const strategy = registry[strategyId];
-  if (!strategy) throw new Error(`unknown strategy: ${strategyId}`);
+  if (!strategy) return { ok: false, error: "unknown_strategy" };
+
+  // Validate + sanitize config at the boundary (hard rule).
+  const v = validateConfig((strategy as any).configSchema, config);
+  if (!v.ok) {
+    const ctx = createContext({ strategyId: (strategy as any).meta?.id ?? strategyId, runId: `rejected-${crypto.randomUUID()}`, store });
+    ctx.emit({ type: "error", message: "config_validation_failed", data: { errors: v.errors, warnings: v.warnings, unknownKeys: v.unknownKeys } });
+    return { ok: false, error: "config_validation_failed", details: v };
+  }
 
   const status: RunnerStatus = { runState: "running", strategyId: strategy.meta.id, runId: crypto.randomUUID() };
   const ctx = createContext({ strategyId: strategy.meta.id, runId: status.runId!, store });
 
+  const sanitizedConfig = v.config;
+
   // Execution mode gating (paper vs live)
-  const requestedMode: ExecutionMode = String(config?.executionMode ?? "paper") === "live" ? "live" : "paper";
+  const requestedMode: ExecutionMode = String(sanitizedConfig?.executionMode ?? "paper") === "live" ? "live" : "paper";
   let effectiveMode: ExecutionMode = requestedMode;
   const reasons: string[] = [];
 
@@ -68,15 +79,17 @@ async function start(strategyId: string, config: any) {
       effectiveMode = "paper";
       reasons.push("server_live_disabled");
     }
-    if (!config?.userEnableLive) {
+    if (!sanitizedConfig?.userEnableLive) {
       effectiveMode = "paper";
       reasons.push("user_not_enabled");
     }
-    if (!config?.walletConnected) {
+    // Wallet connection: we do NOT accept private keys. Wallets are connected client-side
+    // (Phantom/MetaMask/etc) and must be verified server-side.
+    if (!sanitizedConfig?.walletConnected) {
       effectiveMode = "paper";
       reasons.push("wallet_not_connected");
     }
-    if (!config?.planApproved) {
+    if (!sanitizedConfig?.planApproved) {
       effectiveMode = "paper";
       reasons.push("plan_check_failed");
     }
@@ -91,7 +104,7 @@ async function start(strategyId: string, config: any) {
   }
 
   // Ensure strategies always see the effective mode.
-  const effectiveConfig = { ...config, executionMode: effectiveMode };
+  const effectiveConfig = { ...sanitizedConfig, executionMode: effectiveMode };
 
   // Provider selection (read-only).
   const providerKey = String(config?.provider ?? "mock");
@@ -148,6 +161,8 @@ async function start(strategyId: string, config: any) {
       reasons
     }
   };
+
+  return { ok: true };
 }
 
 async function stop(strategyId: string) {
@@ -207,8 +222,17 @@ const server = http.createServer(async (req, res) => {
     let body = "";
     req.on("data", (c) => (body += c));
     req.on("end", async () => {
-      const config = body ? JSON.parse(body) : {};
-      await start(strategyId, config);
+      let config: any = {};
+      try {
+        config = body ? JSON.parse(body) : {};
+      } catch {
+        return json(res, 400, { ok: false, error: "invalid_json" });
+      }
+
+      const r = await start(strategyId, config);
+      if (!r.ok) {
+        return json(res, 400, { ok: false, error: r.error, details: (r as any).details ?? null });
+      }
       return json(res, 200, { ok: true, status: running?.status ?? { runState: "stopped" } });
     });
     return;

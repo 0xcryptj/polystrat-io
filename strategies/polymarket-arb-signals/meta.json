@@ -1,0 +1,14 @@
+{
+  "id": "polymarket-arb-signals",
+  "name": "Polymarket Arbitrage Signals",
+  "author": "polystrat",
+  "license": "MIT",
+  "sourceUrl": "https://github.com/runesatsdev/polymarket-arbitrage-bot",
+  "tags": ["polymarket", "arbitrage", "signals"],
+  "paramsSchema": {"version": 1},
+  "uiHints": {
+    "kind": "strategy",
+    "maturity": "mvp",
+    "safety": {"mode": "paper_only", "liveTrading": false, "handlesKeys": false}
+  }
+}

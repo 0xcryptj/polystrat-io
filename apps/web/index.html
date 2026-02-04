@@ -30,17 +30,80 @@
       a { color: var(--blue); text-decoration: none; }
       a:hover { text-decoration: underline; }
 
-      .container { max-width: 1100px; margin: 0 auto; padding: 18px 18px 60px; }
-      .topbar {
+      #app { min-height: 100vh; }
+
+      /* App shell (GMGN-ish) */
+      .appShell {
+        display: grid;
+        grid-template-columns: 260px 1fr;
+        min-height: 100vh;
+      }
+      .sidebar {
+        position: sticky;
+        top: 0;
+        height: 100vh;
+        padding: 16px 14px;
+        border-right: 1px solid var(--border);
+        background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.00));
         display: flex;
-        align-items: center;
+        flex-direction: column;
+      }
+
+      .sideBrand { display:flex; gap: 10px; align-items:center; padding: 8px 8px 14px; }
+      .sideLogo {
+        width: 34px; height: 34px; border-radius: 12px;
+        display:flex; align-items:center; justify-content:center;
+        border: 1px solid var(--border);
+        background: rgba(87,166,255,0.10);
+        font-weight: 700;
+      }
+      .sideTitle { font-size: 14px; letter-spacing: .2px; }
+      .sideSection { display:flex; flex-direction:column; gap: 6px; padding: 10px 6px; }
+      .sideFooter { margin-top: auto; padding: 10px 6px; }
+
+      .navItem {
+        width: 100%;
+        display:flex; align-items:center; gap: 10px;
+        padding: 10px 10px;
+        border-radius: 12px;
+        border: 1px solid transparent;
+        background: transparent;
+        color: var(--text);
+        cursor: pointer;
+        text-align: left;
+      }
+      .navItem:hover { background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.06); }
+      .navItemOn { background: rgba(87,166,255,0.10); border-color: rgba(87,166,255,0.25); }
+
+      .main { min-width: 0; }
+      .header {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        display:flex;
+        align-items:center;
         justify-content: space-between;
         gap: 12px;
-        padding: 14px 0;
+        padding: 16px 18px;
+        border-bottom: 1px solid var(--border);
+        backdrop-filter: blur(10px);
+        background: rgba(11,15,23,0.7);
       }
-      .brand { display: flex; gap: 10px; align-items: center; }
-      .brand h1 { font-size: 18px; margin: 0; letter-spacing: 0.2px; }
-      .nav { display: flex; gap: 10px; flex-wrap: wrap; }
+      .headerTitle { display:flex; flex-direction:column; gap: 2px; }
+      .headerTitle h1 { margin:0; font-size: 16px; letter-spacing:.2px; }
+
+      .mainInner { padding: 18px 18px 60px; max-width: 1320px; margin: 0 auto; width: 100%; }
+
+      .search {
+        width: min(460px, 52vw);
+        padding: 10px 12px;
+        border-radius: 12px;
+        border: 1px solid var(--border);
+        background: rgba(10,14,22,0.55);
+        color: var(--text);
+        outline: none;
+      }
+      .search:focus { border-color: rgba(87,166,255,0.35); }
 
       .btn {
         border: 1px solid var(--border);
