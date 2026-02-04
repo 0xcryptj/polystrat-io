@@ -1,11 +1,11 @@
 import http from "node:http";
 import crypto from "node:crypto";
-import { makeDummyStrategy, InMemoryEventStore, createContext, RunnerStatus } from "./index.js";
+import { makeDummyStrategy, FileBackedEventStore, createContext, RunnerStatus } from "./index.js";
 
 const PORT = Number(process.env.PORT ?? 3344);
 
 const strategy = makeDummyStrategy();
-const store = new InMemoryEventStore();
+const store = new FileBackedEventStore("data/events.jsonl");
 
 let status: RunnerStatus = { runState: "stopped" };
 let tickTimer: NodeJS.Timeout | null = null;

@@ -16,6 +16,9 @@ coverage
 logs/
 tmp/
 
+# runner local data
+apps/runner/data/
+
 # === OS ===
 .DS_Store
 Thumbs.db

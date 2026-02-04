@@ -1,5 +1,7 @@
 import { Strategy, StrategyContext, StrategyEvent } from "@polystrat/strategy-sdk";
 import { randomUUID } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 
 export type RunnerStatus = {
   runState: "stopped" | "running" | "error";
@@ -7,11 +9,18 @@ export type RunnerStatus = {
   runId?: string;
 };
 
-export class InMemoryEventStore {
+export class FileBackedEventStore {
   private events: StrategyEvent[] = [];
+
+  constructor(private filePath: string) {}
 
   append(event: StrategyEvent) {
     this.events.push(event);
+
+    // JSONL append (one event per line) for easy local inspection.
+    const dir = path.dirname(this.filePath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.appendFileSync(this.filePath, JSON.stringify(event) + "\n", { encoding: "utf8" });
   }
 
   recent(limit = 200) {
@@ -22,7 +31,7 @@ export class InMemoryEventStore {
 export function createContext(params: {
   strategyId: string;
   runId: string;
-  store: InMemoryEventStore;
+  store: FileBackedEventStore;
 }): StrategyContext {
   return {
     now: () => Date.now(),
