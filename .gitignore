@@ -1,0 +1,25 @@
+# === secrets / env ===
+.env
+.env.*
+!.env.example
+
+# === node / builds ===
+node_modules
+dist
+build
+.next
+out
+coverage
+
+# === logs ===
+*.log
+logs/
+tmp/
+
+# === OS ===
+.DS_Store
+Thumbs.db
+
+# === editor ===
+.vscode/
+.idea/
