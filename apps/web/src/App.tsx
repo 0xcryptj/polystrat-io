@@ -514,7 +514,50 @@ export default function App() {
           </div>
 
           <Card>
-            <CardContent className="pt-4">
+            <CardHeader>
+              <CardTitle>Start a run</CardTitle>
+              <div className="text-xs text-mutedForeground">Only enabled strategies can start.</div>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-2">
+                {myStrategies.filter((s) => s.enabled).map((s) => {
+                  const meta = catalogById.get(s.strategyId);
+                  const latest = runs
+                    .filter((r) => r.strategyId === s.strategyId)
+                    .sort((a, b) => b.startedAt - a.startedAt)[0];
+
+                  return (
+                    <div key={s.id} className="flex items-center justify-between rounded-lg border border-border p-3">
+                      <div>
+                        <div className="text-sm font-medium">{meta?.name ?? s.strategyId}</div>
+                        <div className="text-xs text-mutedForeground">
+                          {latest ? `latest: ${latest.status}` : "no runs yet"}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button onClick={() => startRun(s.strategyId, s.config)}>Start</Button>
+                        {latest?.status === "running" ? (
+                          <Button variant="outline" onClick={() => stopRun(latest.runId)}>
+                            Stop latest
+                          </Button>
+                        ) : null}
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {myStrategies.filter((s) => s.enabled).length === 0 ? (
+                  <div className="text-sm text-mutedForeground">No enabled strategies. Enable one in My Strategies.</div>
+                ) : null}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Run history</CardTitle>
+            </CardHeader>
+            <CardContent>
               <div className="grid gap-3">
                 {runs
                   .slice()
@@ -542,9 +585,7 @@ export default function App() {
                   ))}
 
                 {runs.length === 0 ? (
-                  <div className="py-10 text-center text-sm text-mutedForeground">
-                    No runs yet.
-                  </div>
+                  <div className="py-10 text-center text-sm text-mutedForeground">No runs yet.</div>
                 ) : null}
               </div>
             </CardContent>
