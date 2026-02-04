@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { RUNNER_BASE_URL } from "./config";
+import { API_BASE_URL } from "./config";
 import { Shell } from "./components/Shell";
 import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
 import { Button } from "./components/ui/button";
@@ -39,13 +39,13 @@ type RunnerEvent = {
 };
 
 async function apiGet<T>(path: string): Promise<T> {
-  const res = await fetch(`${RUNNER_BASE_URL}${path}`);
+  const res = await fetch(`${API_BASE_URL}${path}`);
   if (!res.ok) throw new Error(`GET ${path} failed: ${res.status}`);
   return (await res.json()) as T;
 }
 
 async function apiPost<T>(path: string, body: any): Promise<T> {
-  const res = await fetch(`${RUNNER_BASE_URL}${path}`, {
+  const res = await fetch(`${API_BASE_URL}${path}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body ?? {})
@@ -172,7 +172,7 @@ export default function App() {
         <Card className="lg:col-span-1">
           <CardHeader>
             <CardTitle>Strategies</CardTitle>
-            <div className="text-xs text-mutedForeground">Runner: {RUNNER_BASE_URL}</div>
+            <div className="text-xs text-mutedForeground">API: {API_BASE_URL}</div>
           </CardHeader>
           <CardContent>
             <div className="space-y-2">

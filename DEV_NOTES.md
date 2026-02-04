@@ -12,8 +12,8 @@ cd $env:USERPROFILE\OneDrive\Desktop\polystrat.io
 npm install
 ```
 
-## Run (2 terminals)
-> Start runner first, then web.
+## Run (3 terminals)
+> Start runner first, then API, then web.
 
 ### Terminal 1 — Runner
 ```powershell
@@ -23,13 +23,21 @@ npm run dev
 
 Runner default: `http://localhost:3344`
 
-### Terminal 2 — Web
+### Terminal 2 — API
+```powershell
+cd $env:USERPROFILE\OneDrive\Desktop\polystrat.io\apps\api
+npm run dev
+```
+
+API default: `http://localhost:3399`
+
+### Terminal 3 — Web
 ```powershell
 cd $env:USERPROFILE\OneDrive\Desktop\polystrat.io\apps\web
 npm run dev
 ```
 
-Open the URL Vite prints (usually `http://localhost:5173`).
+Open the URL Vite prints (usually `http://127.0.0.1:5173`).
 
 ## Local API (runner)
 - `GET /strategies`
