@@ -3,30 +3,48 @@ import { API_BASE_URL } from "./config";
 import { Shell } from "./components/Shell";
 import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
 import { Button } from "./components/ui/button";
+import { Badge } from "./components/ui/badge";
+import { Switch } from "./components/ui/switch";
+import { Modal } from "./components/ui/modal";
 
-type StrategyStatus = {
-  runState: "stopped" | "running" | "error";
-  strategyId?: string;
-  runId?: string;
+type CatalogParam = {
+  key: string;
+  type: "string" | "number" | "boolean";
+  default?: any;
+  min?: number;
+  max?: number;
+  step?: number;
 };
 
-type Strategy = {
+type StrategyMeta = {
   id: string;
   name: string;
   description?: string;
-  configSchema: {
-    fields: Array<{
-      key: string;
-      label: string;
-      type: "string" | "number" | "boolean" | "select";
-      default?: any;
-      min?: number;
-      max?: number;
-      step?: number;
-      options?: Array<{ label: string; value: string }>;
-    }>;
-  };
-  status: StrategyStatus;
+  tags?: string[];
+  author?: string;
+  license?: string;
+  sourceUrl?: string;
+  paramsSchema?: CatalogParam[];
+};
+
+type MyStrategy = {
+  id: string;
+  userId: string;
+  strategyId: string;
+  nickname?: string;
+  enabled: boolean;
+  config: Record<string, any>;
+  createdAt: number;
+  updatedAt: number;
+};
+
+type RunRecord = {
+  runId: string;
+  strategyId: string;
+  status: "running" | "stopped" | "error";
+  startedAt: number;
+  stoppedAt?: number;
+  config: any;
 };
 
 type RunnerEvent = {
@@ -54,36 +72,84 @@ async function apiPost<T>(path: string, body: any): Promise<T> {
   return (await res.json()) as T;
 }
 
-type PageKey = "strategy-library" | "runs" | "logs";
+async function apiPatch<T>(path: string, body: any): Promise<T> {
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body ?? {})
+  });
+  if (!res.ok) throw new Error(`PATCH ${path} failed: ${res.status}`);
+  return (await res.json()) as T;
+}
+
+async function apiDelete<T>(path: string): Promise<T> {
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    method: "DELETE"
+  });
+  if (!res.ok) throw new Error(`DELETE ${path} failed: ${res.status}`);
+  return (await res.json()) as T;
+}
+
+type PageKey = "dashboard" | "library" | "my" | "runs" | "settings";
 
 export default function App() {
-  const [page, setPage] = useState<PageKey>("strategy-library");
-  const [strategies, setStrategies] = useState<Strategy[]>([]);
-  const [events, setEvents] = useState<RunnerEvent[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [config, setConfig] = useState<Record<string, any>>({});
+  const [page, setPage] = useState<PageKey>("dashboard");
   const [error, setError] = useState<string | null>(null);
 
-  const selected = useMemo(
-    () => strategies.find((s) => s.id === selectedId) ?? null,
-    [strategies, selectedId]
+  // catalog + my strategies
+  const [catalog, setCatalog] = useState<StrategyMeta[]>([]);
+  const [myStrategies, setMyStrategies] = useState<MyStrategy[]>([]);
+
+  // runs + events
+  const [runs, setRuns] = useState<RunRecord[]>([]);
+  const [events, setEvents] = useState<RunnerEvent[]>([]);
+
+  // ui state
+  const [search, setSearch] = useState("");
+  const [tag, setTag] = useState<string | null>(null);
+  const [configOpen, setConfigOpen] = useState(false);
+  const [activeMyId, setActiveMyId] = useState<string | null>(null);
+  const [draftConfig, setDraftConfig] = useState<Record<string, any>>({});
+
+  const catalogById = useMemo(() => new Map(catalog.map((s) => [s.id, s])), [catalog]);
+
+  const activeMy = useMemo(
+    () => myStrategies.find((s) => s.id === activeMyId) ?? null,
+    [myStrategies, activeMyId]
   );
 
-  // Load saved theme
+  const activeMeta = useMemo(
+    () => (activeMy ? catalogById.get(activeMy.strategyId) ?? null : null),
+    [activeMy, catalogById]
+  );
+
+  // Theme init
   useEffect(() => {
     const saved = localStorage.getItem("theme");
     if (saved === "dark") document.documentElement.classList.add("dark");
   }, []);
 
-  // Load strategies
+  const refreshCatalog = async () => {
+    const data = await apiGet<{ strategies: StrategyMeta[] }>("/strategy-catalog");
+    setCatalog(data.strategies ?? []);
+  };
+
+  const refreshMy = async () => {
+    const data = await apiGet<{ strategies: MyStrategy[] }>("/my-strategies");
+    setMyStrategies(data.strategies ?? []);
+  };
+
+  const refreshRuns = async () => {
+    const data = await apiGet<{ runs: RunRecord[] }>("/runs");
+    setRuns(data.runs ?? []);
+  };
+
+  // initial load
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const data = await apiGet<{ strategies: Strategy[] }>("/strategies");
-        if (cancelled) return;
-        setStrategies(data.strategies);
-        if (!selectedId && data.strategies[0]) setSelectedId(data.strategies[0].id);
+        await Promise.all([refreshCatalog(), refreshMy(), refreshRuns()]);
       } catch (e: any) {
         if (cancelled) return;
         setError(String(e?.message ?? e));
@@ -95,17 +161,7 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // When selection changes, seed config defaults
-  useEffect(() => {
-    if (!selected) return;
-    const next: Record<string, any> = {};
-    for (const f of selected.configSchema.fields) {
-      if (typeof f.default !== "undefined") next[f.key] = f.default;
-    }
-    setConfig(next);
-  }, [selected]);
-
-  // Poll logs
+  // Poll events from API (back-compat uses /logs which returns payload array)
   useEffect(() => {
     let cancelled = false;
     const tick = async () => {
@@ -127,24 +183,104 @@ export default function App() {
     };
   }, []);
 
-  const refreshStrategies = async () => {
-    const data = await apiGet<{ strategies: Strategy[] }>("/strategies");
-    setStrategies(data.strategies);
+  const tagOptions = useMemo(() => {
+    const s = new Set<string>();
+    for (const m of catalog) for (const t of m.tags ?? []) s.add(t);
+    return Array.from(s.values()).sort();
+  }, [catalog]);
+
+  const filteredCatalog = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return catalog.filter((m) => {
+      const matchesQ =
+        !q ||
+        m.name.toLowerCase().includes(q) ||
+        (m.description ?? "").toLowerCase().includes(q) ||
+        m.id.toLowerCase().includes(q);
+      const matchesTag = !tag || (m.tags ?? []).includes(tag);
+      return matchesQ && matchesTag;
+    });
+  }, [catalog, search, tag]);
+
+  const addFromLibrary = async (strategyId: string) => {
+    setError(null);
+    try {
+      await apiPost("/my-strategies", { strategyId });
+      await refreshMy();
+      setPage("my");
+    } catch (e: any) {
+      setError(String(e?.message ?? e));
+    }
   };
 
-  const onStart = async () => {
-    if (!selected) return;
+  const toggleEnabled = async (myId: string, enabled: boolean) => {
     setError(null);
-    await apiPost(`/strategies/${selected.id}/start`, config);
-    await refreshStrategies();
-    setPage("runs");
+    try {
+      await apiPatch(`/my-strategies/${myId}`, { enabled });
+      await refreshMy();
+    } catch (e: any) {
+      setError(String(e?.message ?? e));
+    }
   };
 
-  const onStop = async () => {
-    if (!selected) return;
+  const openConfigure = (myId: string) => {
+    const rec = myStrategies.find((s) => s.id === myId);
+    if (!rec) return;
+
+    const meta = catalogById.get(rec.strategyId);
+    const seeded: Record<string, any> = { ...rec.config };
+    for (const p of meta?.paramsSchema ?? []) {
+      if (typeof seeded[p.key] === "undefined" && typeof p.default !== "undefined") {
+        seeded[p.key] = p.default;
+      }
+    }
+
+    setActiveMyId(myId);
+    setDraftConfig(seeded);
+    setConfigOpen(true);
+  };
+
+  const saveConfigure = async () => {
+    if (!activeMy) return;
     setError(null);
-    await apiPost(`/strategies/${selected.id}/stop`, {});
-    await refreshStrategies();
+    try {
+      await apiPatch(`/my-strategies/${activeMy.id}`, { config: draftConfig });
+      await refreshMy();
+      setConfigOpen(false);
+    } catch (e: any) {
+      setError(String(e?.message ?? e));
+    }
+  };
+
+  const removeMy = async (myId: string) => {
+    setError(null);
+    try {
+      await apiDelete(`/my-strategies/${myId}`);
+      await refreshMy();
+    } catch (e: any) {
+      setError(String(e?.message ?? e));
+    }
+  };
+
+  const startRun = async (strategyId: string, config: any) => {
+    setError(null);
+    try {
+      await apiPost("/runs/start", { strategyId, config });
+      await refreshRuns();
+      setPage("runs");
+    } catch (e: any) {
+      setError(String(e?.message ?? e));
+    }
+  };
+
+  const stopRun = async (runId: string) => {
+    setError(null);
+    try {
+      await apiPost(`/runs/${runId}/stop`, {});
+      await refreshRuns();
+    } catch (e: any) {
+      setError(String(e?.message ?? e));
+    }
   };
 
   const newestFirst = useMemo(() => [...events].reverse(), [events]);
@@ -152,9 +288,11 @@ export default function App() {
   return (
     <Shell
       nav={[
-        { key: "strategy-library", label: "Strategy Library" },
+        { key: "dashboard", label: "Dashboard" },
+        { key: "library", label: "Strategy Library" },
+        { key: "my", label: "My Strategies" },
         { key: "runs", label: "Runs" },
-        { key: "logs", label: "Logs" }
+        { key: "settings", label: "Settings" }
       ]}
       active={page}
       onSelect={(k) => setPage(k as PageKey)}
@@ -168,142 +306,342 @@ export default function App() {
         </Card>
       ) : null}
 
-      <div className="grid gap-4 lg:grid-cols-3">
-        <Card className="lg:col-span-1">
-          <CardHeader>
-            <CardTitle>Strategies</CardTitle>
-            <div className="text-xs text-mutedForeground">API: {API_BASE_URL}</div>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              {strategies.map((s) => (
-                <button
-                  key={s.id}
-                  className={
-                    "w-full rounded-lg border border-border px-3 py-2 text-left hover:bg-muted " +
-                    (selectedId === s.id ? "bg-muted" : "bg-card")
-                  }
-                  onClick={() => setSelectedId(s.id)}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="text-sm font-medium">{s.name}</div>
-                    <div
-                      className={
-                        "rounded-full border px-2 py-0.5 text-xs " +
-                        (s.status.runState === "running"
-                          ? "border-emerald-500/40 text-emerald-400"
-                          : s.status.runState === "error"
-                            ? "border-red-500/40 text-red-400"
-                            : "border-border text-mutedForeground")
-                      }
-                    >
-                      {s.status.runState}
-                    </div>
-                  </div>
-                  <div className="mt-1 text-xs text-mutedForeground">{s.description}</div>
-                  <div className="mt-1 font-mono text-[11px] text-mutedForeground">{s.id}</div>
-                </button>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+      {page === "dashboard" ? (
+        <div className="grid gap-4 lg:grid-cols-3">
+          <Card>
+            <CardHeader>
+              <CardTitle>Catalog</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-semibold">{catalog.length}</div>
+              <div className="text-xs text-mutedForeground">strategies available</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle>My Strategies</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-semibold">{myStrategies.length}</div>
+              <div className="text-xs text-mutedForeground">configs saved</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle>Runs</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-semibold">{runs.length}</div>
+              <div className="text-xs text-mutedForeground">recent runs (memory)</div>
+            </CardContent>
+          </Card>
 
-        <Card className="lg:col-span-1">
-          <CardHeader>
-            <CardTitle>Config + Controls</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {!selected ? (
-              <div className="text-sm text-mutedForeground">Select a strategy</div>
-            ) : (
-              <div className="space-y-4">
-                <div className="space-y-3">
-                  {selected.configSchema.fields.map((f) => (
-                    <label key={f.key} className="block">
-                      <div className="text-xs font-medium">{f.label}</div>
-                      <div className="mt-1">
-                        {f.type === "number" ? (
-                          <input
-                            className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm"
-                            type="number"
-                            value={config[f.key] ?? ""}
-                            min={f.min}
-                            max={f.max}
-                            step={f.step}
-                            onChange={(e) =>
-                              setConfig((c) => ({ ...c, [f.key]: Number(e.target.value) }))
-                            }
-                          />
-                        ) : f.type === "boolean" ? (
-                          <input
-                            type="checkbox"
-                            checked={Boolean(config[f.key])}
-                            onChange={(e) => setConfig((c) => ({ ...c, [f.key]: e.target.checked }))}
-                          />
-                        ) : (
-                          <input
-                            className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm"
-                            type="text"
-                            value={String(config[f.key] ?? "")}
-                            onChange={(e) =>
-                              setConfig((c) => ({ ...c, [f.key]: e.target.value }))
-                            }
-                          />
-                        )}
+          <Card className="lg:col-span-3">
+            <CardHeader>
+              <CardTitle>Live Events</CardTitle>
+              <div className="text-xs text-mutedForeground">API: {API_BASE_URL} (polling /logs)</div>
+            </CardHeader>
+            <CardContent>
+              <div className="max-h-[55vh] overflow-auto rounded-lg border border-border">
+                {newestFirst.slice(0, 50).map((e) => (
+                  <div key={e.id} className="border-b border-border px-3 py-2">
+                    <div className="flex items-center gap-2">
+                      <div className="font-mono text-[11px] text-mutedForeground">
+                        {new Date(e.ts).toLocaleTimeString()}
                       </div>
-                      <div className="mt-1 font-mono text-[11px] text-mutedForeground">{f.key}</div>
-                    </label>
-                  ))}
-                </div>
-
-                <div className="flex gap-2">
-                  <Button onClick={onStart}>Start</Button>
-                  <Button variant="outline" onClick={onStop}>
-                    Stop
-                  </Button>
-                  <Button variant="ghost" onClick={refreshStrategies}>
-                    Refresh
-                  </Button>
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card className="lg:col-span-1">
-          <CardHeader>
-            <CardTitle>Live Events</CardTitle>
-            <div className="text-xs text-mutedForeground">Polling /logs</div>
-          </CardHeader>
-          <CardContent>
-            <div className="max-h-[70vh] overflow-auto rounded-lg border border-border">
-              {newestFirst.map((e) => (
-                <div key={e.id} className="border-b border-border px-3 py-2">
-                  <div className="flex items-center gap-2">
-                    <div className="font-mono text-[11px] text-mutedForeground">
-                      {new Date(e.ts).toLocaleTimeString()}
+                      <div className="font-mono text-[11px] text-mutedForeground">{e.type}</div>
                     </div>
-                    <div className="font-mono text-[11px] text-mutedForeground">{e.type}</div>
+                    <div className="mt-1 text-sm">
+                      {e.type === "paperTrade"
+                        ? `${e.side} ${e.size} @ ${e.price} (${e.marketId})`
+                        : e.message}
+                    </div>
+                    <div className="mt-1 font-mono text-[11px] text-mutedForeground">
+                      {e.strategyId} / {e.runId}
+                    </div>
                   </div>
-                  <div className="mt-1 text-sm">
-                    {e.type === "paperTrade"
-                      ? `${e.side} ${e.size} @ ${e.price} (${e.marketId})`
-                      : e.message}
-                  </div>
-                  <div className="mt-1 font-mono text-[11px] text-mutedForeground">
-                    {e.strategyId} / {e.runId}
-                  </div>
-                </div>
-              ))}
-              {newestFirst.length === 0 ? (
-                <div className="px-3 py-8 text-center text-sm text-mutedForeground">
-                  No events yet.
-                </div>
-              ) : null}
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      ) : null}
+
+      {page === "library" ? (
+        <div className="space-y-4">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <div className="text-sm font-semibold">Strategy Library</div>
+              <div className="text-xs text-mutedForeground">Local catalog (strategies/*/meta.json)</div>
             </div>
-          </CardContent>
-        </Card>
-      </div>
+            <div className="flex gap-2">
+              <input
+                className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm md:w-72"
+                placeholder="Search strategies…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+              <Button variant="outline" onClick={() => refreshCatalog()}>
+                Refresh
+              </Button>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <button
+              className={
+                "rounded-full border px-3 py-1 text-xs " +
+                (!tag ? "border-primary/40 text-foreground" : "border-border text-mutedForeground")
+              }
+              onClick={() => setTag(null)}
+            >
+              All
+            </button>
+            {tagOptions.map((t) => (
+              <button
+                key={t}
+                className={
+                  "rounded-full border px-3 py-1 text-xs " +
+                  (tag === t ? "border-primary/40 text-foreground" : "border-border text-mutedForeground")
+                }
+                onClick={() => setTag(tag === t ? null : t)}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {filteredCatalog.map((m) => (
+              <Card key={m.id}>
+                <CardHeader>
+                  <CardTitle>{m.name}</CardTitle>
+                  <div className="text-xs text-mutedForeground">{m.description}</div>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex flex-wrap gap-2">
+                    {(m.tags ?? []).map((t) => (
+                      <Badge key={t}>{t}</Badge>
+                    ))}
+                  </div>
+                  <div className="mt-3 font-mono text-[11px] text-mutedForeground">{m.id}</div>
+                  <div className="mt-4 flex gap-2">
+                    <Button onClick={() => addFromLibrary(m.id)}>Add</Button>
+                    <Button variant="outline" onClick={() => setPage("my")}>Go to My</Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {page === "my" ? (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-sm font-semibold">My Strategies</div>
+              <div className="text-xs text-mutedForeground">Per-user configs (in-memory)</div>
+            </div>
+            <Button variant="outline" onClick={() => refreshMy()}>
+              Refresh
+            </Button>
+          </div>
+
+          <Card>
+            <CardContent className="pt-4">
+              <div className="grid gap-3">
+                {myStrategies.map((s) => {
+                  const meta = catalogById.get(s.strategyId);
+                  return (
+                    <div
+                      key={s.id}
+                      className="flex flex-col gap-3 rounded-lg border border-border p-3 md:flex-row md:items-center md:justify-between"
+                    >
+                      <div>
+                        <div className="text-sm font-medium">
+                          {s.nickname ?? meta?.name ?? s.strategyId}
+                        </div>
+                        <div className="text-xs text-mutedForeground">{meta?.description}</div>
+                        <div className="mt-1 font-mono text-[11px] text-mutedForeground">
+                          {s.strategyId} · {new Date(s.updatedAt).toLocaleString()}
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="flex items-center gap-2">
+                          <div className="text-xs text-mutedForeground">Enabled</div>
+                          <Switch checked={s.enabled} onCheckedChange={(v) => toggleEnabled(s.id, v)} />
+                        </div>
+                        <Button variant="outline" onClick={() => openConfigure(s.id)}>
+                          Configure
+                        </Button>
+                        <Button
+                          onClick={() => startRun(s.strategyId, s.config)}
+                          disabled={!s.enabled}
+                        >
+                          Start Run
+                        </Button>
+                        <Button variant="ghost" onClick={() => removeMy(s.id)}>
+                          Remove
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {myStrategies.length === 0 ? (
+                  <div className="py-10 text-center text-sm text-mutedForeground">
+                    No strategies yet. Go to Strategy Library and add one.
+                  </div>
+                ) : null}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      ) : null}
+
+      {page === "runs" ? (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-sm font-semibold">Runs</div>
+              <div className="text-xs text-mutedForeground">API memory store (will be DB later)</div>
+            </div>
+            <Button variant="outline" onClick={() => refreshRuns()}>
+              Refresh
+            </Button>
+          </div>
+
+          <Card>
+            <CardContent className="pt-4">
+              <div className="grid gap-3">
+                {runs
+                  .slice()
+                  .sort((a, b) => b.startedAt - a.startedAt)
+                  .map((r) => (
+                    <div
+                      key={r.runId}
+                      className="flex flex-col gap-3 rounded-lg border border-border p-3 md:flex-row md:items-center md:justify-between"
+                    >
+                      <div>
+                        <div className="text-sm font-medium">{catalogById.get(r.strategyId)?.name ?? r.strategyId}</div>
+                        <div className="mt-1 font-mono text-[11px] text-mutedForeground">runId: {r.runId}</div>
+                        <div className="mt-1 text-xs text-mutedForeground">
+                          {new Date(r.startedAt).toLocaleString()} · {r.status}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {r.status === "running" ? (
+                          <Button variant="outline" onClick={() => stopRun(r.runId)}>
+                            Stop
+                          </Button>
+                        ) : null}
+                      </div>
+                    </div>
+                  ))}
+
+                {runs.length === 0 ? (
+                  <div className="py-10 text-center text-sm text-mutedForeground">
+                    No runs yet.
+                  </div>
+                ) : null}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      ) : null}
+
+      {page === "settings" ? (
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Card>
+            <CardHeader>
+              <CardTitle>Dev Settings</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-sm">API_BASE_URL</div>
+              <div className="mt-1 font-mono text-xs text-mutedForeground">{API_BASE_URL}</div>
+            </CardContent>
+          </Card>
+        </div>
+      ) : null}
+
+      <Modal
+        open={configOpen}
+        title={`Configure: ${activeMeta?.name ?? activeMy?.strategyId ?? ""}`}
+        onClose={() => setConfigOpen(false)}
+      >
+        {!activeMy || !activeMeta ? (
+          <div className="text-sm text-mutedForeground">No strategy selected</div>
+        ) : (
+          <div className="space-y-4">
+            <div className="grid gap-3">
+              {(activeMeta.paramsSchema ?? []).map((p) => {
+                const v = draftConfig[p.key];
+                return (
+                  <div key={p.key} className="rounded-lg border border-border p-3">
+                    <div className="flex items-center justify-between">
+                      <div className="text-sm font-medium">{p.key}</div>
+                      <div className="font-mono text-xs text-mutedForeground">{String(v ?? "")}</div>
+                    </div>
+
+                    {p.type === "number" ? (
+                      <div className="mt-2">
+                        <input
+                          className="w-full"
+                          type="range"
+                          min={p.min ?? 0}
+                          max={p.max ?? 1}
+                          step={p.step ?? 0.01}
+                          value={typeof v === "number" ? v : p.default ?? 0}
+                          onChange={(e) =>
+                            setDraftConfig((c) => ({ ...c, [p.key]: Number(e.target.value) }))
+                          }
+                        />
+                        <input
+                          className="mt-2 h-9 w-full rounded-md border border-border bg-background px-3 text-sm"
+                          type="number"
+                          value={typeof v === "number" ? v : p.default ?? 0}
+                          min={p.min}
+                          max={p.max}
+                          step={p.step}
+                          onChange={(e) =>
+                            setDraftConfig((c) => ({ ...c, [p.key]: Number(e.target.value) }))
+                          }
+                        />
+                      </div>
+                    ) : p.type === "boolean" ? (
+                      <div className="mt-2 flex items-center gap-2">
+                        <Switch
+                          checked={Boolean(v)}
+                          onCheckedChange={(nv) => setDraftConfig((c) => ({ ...c, [p.key]: nv }))}
+                        />
+                        <div className="text-xs text-mutedForeground">{Boolean(v) ? "On" : "Off"}</div>
+                      </div>
+                    ) : (
+                      <div className="mt-2">
+                        <input
+                          className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm"
+                          type="text"
+                          value={String(v ?? "")}
+                          onChange={(e) => setDraftConfig((c) => ({ ...c, [p.key]: e.target.value }))}
+                        />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setConfigOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={saveConfigure}>Save</Button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </Shell>
   );
 }
