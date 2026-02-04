@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import "./App.css";
 import { RUNNER_BASE_URL } from "./config";
+import { Shell } from "./components/Shell";
+import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
+import { Button } from "./components/ui/button";
 
 type StrategyStatus = {
   runState: "stopped" | "running" | "error";
@@ -52,7 +54,10 @@ async function apiPost<T>(path: string, body: any): Promise<T> {
   return (await res.json()) as T;
 }
 
-function App() {
+type PageKey = "strategy-library" | "runs" | "logs";
+
+export default function App() {
+  const [page, setPage] = useState<PageKey>("strategy-library");
   const [strategies, setStrategies] = useState<Strategy[]>([]);
   const [events, setEvents] = useState<RunnerEvent[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -64,6 +69,12 @@ function App() {
     [strategies, selectedId]
   );
 
+  // Load saved theme
+  useEffect(() => {
+    const saved = localStorage.getItem("theme");
+    if (saved === "dark") document.documentElement.classList.add("dark");
+  }, []);
+
   // Load strategies
   useEffect(() => {
     let cancelled = false;
@@ -72,9 +83,7 @@ function App() {
         const data = await apiGet<{ strategies: Strategy[] }>("/strategies");
         if (cancelled) return;
         setStrategies(data.strategies);
-        if (!selectedId && data.strategies[0]) {
-          setSelectedId(data.strategies[0].id);
-        }
+        if (!selectedId && data.strategies[0]) setSelectedId(data.strategies[0].id);
       } catch (e: any) {
         if (cancelled) return;
         setError(String(e?.message ?? e));
@@ -111,147 +120,190 @@ function App() {
     };
 
     tick();
-    const id = window.setInterval(tick, 1500);
+    const id = window.setInterval(tick, 1200);
     return () => {
       cancelled = true;
       window.clearInterval(id);
     };
   }, []);
 
+  const refreshStrategies = async () => {
+    const data = await apiGet<{ strategies: Strategy[] }>("/strategies");
+    setStrategies(data.strategies);
+  };
+
   const onStart = async () => {
     if (!selected) return;
     setError(null);
     await apiPost(`/strategies/${selected.id}/start`, config);
-    const data = await apiGet<{ strategies: Strategy[] }>("/strategies");
-    setStrategies(data.strategies);
+    await refreshStrategies();
+    setPage("runs");
   };
 
   const onStop = async () => {
     if (!selected) return;
     setError(null);
     await apiPost(`/strategies/${selected.id}/stop`, {});
-    const data = await apiGet<{ strategies: Strategy[] }>("/strategies");
-    setStrategies(data.strategies);
+    await refreshStrategies();
   };
 
   const newestFirst = useMemo(() => [...events].reverse(), [events]);
 
   return (
-    <div className="page">
-      <header className="header">
-        <div>
-          <div className="title">polystrat.io — thin slice (paper mode)</div>
-          <div className="subtitle">Runner: {RUNNER_BASE_URL}</div>
-        </div>
-        {error ? <div className="error">{error}</div> : null}
-      </header>
+    <Shell
+      nav={[
+        { key: "strategy-library", label: "Strategy Library" },
+        { key: "runs", label: "Runs" },
+        { key: "logs", label: "Logs" }
+      ]}
+      active={page}
+      onSelect={(k) => setPage(k as PageKey)}
+    >
+      {error ? (
+        <Card className="mb-4 border-red-500/30">
+          <CardHeader>
+            <CardTitle className="text-red-400">Error</CardTitle>
+          </CardHeader>
+          <CardContent className="text-sm text-mutedForeground">{error}</CardContent>
+        </Card>
+      ) : null}
 
-      <main className="grid">
-        <section className="panel">
-          <h2>Strategies</h2>
-          <div className="strategyList">
-            {strategies.map((s) => (
-              <button
-                key={s.id}
-                className={`strategyItem ${selectedId === s.id ? "active" : ""}`}
-                onClick={() => setSelectedId(s.id)}
-              >
-                <div className="row">
-                  <div className="name">{s.name}</div>
-                  <div className={`badge ${s.status.runState}`}>{s.status.runState}</div>
-                </div>
-                <div className="desc">{s.description}</div>
-                <div className="mono">id: {s.id}</div>
-              </button>
-            ))}
-          </div>
-        </section>
-
-        <section className="panel">
-          <h2>Config + Controls</h2>
-          {!selected ? (
-            <div className="muted">No strategy selected</div>
-          ) : (
-            <>
-              <div className="form">
-                {selected.configSchema.fields.map((f) => (
-                  <label key={f.key} className="field">
-                    <div className="label">{f.label}</div>
-                    {f.type === "number" ? (
-                      <input
-                        type="number"
-                        value={config[f.key] ?? ""}
-                        min={f.min}
-                        max={f.max}
-                        step={f.step}
-                        onChange={(e) => setConfig((c) => ({ ...c, [f.key]: Number(e.target.value) }))}
-                      />
-                    ) : f.type === "boolean" ? (
-                      <input
-                        type="checkbox"
-                        checked={Boolean(config[f.key])}
-                        onChange={(e) => setConfig((c) => ({ ...c, [f.key]: e.target.checked }))}
-                      />
-                    ) : f.type === "select" ? (
-                      <select
-                        value={String(config[f.key] ?? "")}
-                        onChange={(e) => setConfig((c) => ({ ...c, [f.key]: e.target.value }))}
-                      >
-                        {(f.options ?? []).map((o) => (
-                          <option key={o.value} value={o.value}>
-                            {o.label}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      <input
-                        type="text"
-                        value={String(config[f.key] ?? "")}
-                        onChange={(e) => setConfig((c) => ({ ...c, [f.key]: e.target.value }))}
-                      />
-                    )}
-                    <div className="mono muted">{f.key}</div>
-                  </label>
-                ))}
-              </div>
-
-              <div className="controls">
-                <button className="btn" onClick={onStart}>
-                  Start
+      <div className="grid gap-4 lg:grid-cols-3">
+        <Card className="lg:col-span-1">
+          <CardHeader>
+            <CardTitle>Strategies</CardTitle>
+            <div className="text-xs text-mutedForeground">Runner: {RUNNER_BASE_URL}</div>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {strategies.map((s) => (
+                <button
+                  key={s.id}
+                  className={
+                    "w-full rounded-lg border border-border px-3 py-2 text-left hover:bg-muted " +
+                    (selectedId === s.id ? "bg-muted" : "bg-card")
+                  }
+                  onClick={() => setSelectedId(s.id)}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-sm font-medium">{s.name}</div>
+                    <div
+                      className={
+                        "rounded-full border px-2 py-0.5 text-xs " +
+                        (s.status.runState === "running"
+                          ? "border-emerald-500/40 text-emerald-400"
+                          : s.status.runState === "error"
+                            ? "border-red-500/40 text-red-400"
+                            : "border-border text-mutedForeground")
+                      }
+                    >
+                      {s.status.runState}
+                    </div>
+                  </div>
+                  <div className="mt-1 text-xs text-mutedForeground">{s.description}</div>
+                  <div className="mt-1 font-mono text-[11px] text-mutedForeground">{s.id}</div>
                 </button>
-                <button className="btn" onClick={onStop}>
-                  Stop
-                </button>
-              </div>
-            </>
-          )}
-        </section>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
 
-        <section className="panel logs">
-          <h2>Logs (polling)</h2>
-          <div className="logList">
-            {newestFirst.map((e) => (
-              <div key={e.id} className={`logRow ${e.type}`}>
-                <div className="mono ts">{new Date(e.ts).toLocaleTimeString()}</div>
-                <div className="mono type">{e.type}</div>
-                <div className="msg">
-                  {e.type === "log" ? e.message : null}
-                  {e.type === "signal" ? e.message : null}
-                  {e.type === "error" ? e.message : null}
-                  {e.type === "paperTrade" ? `${e.side} ${e.size} @ ${e.price} (${e.marketId})` : null}
-                  <div className="mono muted small">{e.strategyId} / {e.runId}</div>
+        <Card className="lg:col-span-1">
+          <CardHeader>
+            <CardTitle>Config + Controls</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {!selected ? (
+              <div className="text-sm text-mutedForeground">Select a strategy</div>
+            ) : (
+              <div className="space-y-4">
+                <div className="space-y-3">
+                  {selected.configSchema.fields.map((f) => (
+                    <label key={f.key} className="block">
+                      <div className="text-xs font-medium">{f.label}</div>
+                      <div className="mt-1">
+                        {f.type === "number" ? (
+                          <input
+                            className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm"
+                            type="number"
+                            value={config[f.key] ?? ""}
+                            min={f.min}
+                            max={f.max}
+                            step={f.step}
+                            onChange={(e) =>
+                              setConfig((c) => ({ ...c, [f.key]: Number(e.target.value) }))
+                            }
+                          />
+                        ) : f.type === "boolean" ? (
+                          <input
+                            type="checkbox"
+                            checked={Boolean(config[f.key])}
+                            onChange={(e) => setConfig((c) => ({ ...c, [f.key]: e.target.checked }))}
+                          />
+                        ) : (
+                          <input
+                            className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm"
+                            type="text"
+                            value={String(config[f.key] ?? "")}
+                            onChange={(e) =>
+                              setConfig((c) => ({ ...c, [f.key]: e.target.value }))
+                            }
+                          />
+                        )}
+                      </div>
+                      <div className="mt-1 font-mono text-[11px] text-mutedForeground">{f.key}</div>
+                    </label>
+                  ))}
+                </div>
+
+                <div className="flex gap-2">
+                  <Button onClick={onStart}>Start</Button>
+                  <Button variant="outline" onClick={onStop}>
+                    Stop
+                  </Button>
+                  <Button variant="ghost" onClick={refreshStrategies}>
+                    Refresh
+                  </Button>
                 </div>
               </div>
-            ))}
-          </div>
-        </section>
-      </main>
+            )}
+          </CardContent>
+        </Card>
 
-      <footer className="footer">
-        Paper mode only. No wallets. No payments. No Polymarket execution.
-      </footer>
-    </div>
+        <Card className="lg:col-span-1">
+          <CardHeader>
+            <CardTitle>Live Events</CardTitle>
+            <div className="text-xs text-mutedForeground">Polling /logs</div>
+          </CardHeader>
+          <CardContent>
+            <div className="max-h-[70vh] overflow-auto rounded-lg border border-border">
+              {newestFirst.map((e) => (
+                <div key={e.id} className="border-b border-border px-3 py-2">
+                  <div className="flex items-center gap-2">
+                    <div className="font-mono text-[11px] text-mutedForeground">
+                      {new Date(e.ts).toLocaleTimeString()}
+                    </div>
+                    <div className="font-mono text-[11px] text-mutedForeground">{e.type}</div>
+                  </div>
+                  <div className="mt-1 text-sm">
+                    {e.type === "paperTrade"
+                      ? `${e.side} ${e.size} @ ${e.price} (${e.marketId})`
+                      : e.message}
+                  </div>
+                  <div className="mt-1 font-mono text-[11px] text-mutedForeground">
+                    {e.strategyId} / {e.runId}
+                  </div>
+                </div>
+              ))}
+              {newestFirst.length === 0 ? (
+                <div className="px-3 py-8 text-center text-sm text-mutedForeground">
+                  No events yet.
+                </div>
+              ) : null}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </Shell>
   );
 }
-
-export default App;
