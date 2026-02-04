@@ -6,6 +6,7 @@ import path from "node:path";
 
 const API_PORT = Number(process.env.PORT ?? 3399);
 const RUNNER_BASE_URL = process.env.RUNNER_BASE_URL ?? "http://localhost:3344";
+const DEV_USER_ID = process.env.DEV_USER_ID ?? "dev-user-1";
 
 type RunRecord = {
   runId: string;
@@ -77,17 +78,83 @@ app.get("/health", async () => {
   return { ok: true, service: "api" };
 });
 
+type CatalogParam = {
+  key: string;
+  type: "string" | "number" | "boolean";
+  default?: any;
+  min?: number;
+  max?: number;
+  step?: number;
+};
+
+type CatalogMeta = {
+  id: string;
+  name: string;
+  description?: string;
+  tags?: string[];
+  author?: string;
+  license?: string;
+  sourceUrl?: string;
+  paramsSchema?: CatalogParam[];
+};
+
+type MyStrategy = {
+  id: string;
+  userId: string;
+  strategyId: string;
+  nickname?: string;
+  enabled: boolean;
+  config: Record<string, any>;
+  createdAt: number;
+  updatedAt: number;
+};
+
+const myStrategies = new Map<string, MyStrategy>();
+
+function readStrategyCatalog(): CatalogMeta[] {
+  const root = process.cwd();
+  // apps/api -> repo root
+  const repoRoot = path.resolve(root, "..", "..");
+  const strategiesDir = path.join(repoRoot, "strategies");
+
+  let entries: fs.Dirent[] = [];
+  try {
+    entries = fs.readdirSync(strategiesDir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+
+  const metas: CatalogMeta[] = [];
+  for (const ent of entries) {
+    if (!ent.isDirectory()) continue;
+    if (ent.name.startsWith(".")) continue;
+    if (ent.name === "_template") continue;
+
+    const metaPath = path.join(strategiesDir, ent.name, "meta.json");
+    if (!fs.existsSync(metaPath)) continue;
+    try {
+      const raw = fs.readFileSync(metaPath, "utf8");
+      const meta = JSON.parse(raw);
+      if (meta && typeof meta.id === "string") metas.push(meta as CatalogMeta);
+    } catch {
+      // ignore bad meta
+    }
+  }
+
+  return metas;
+}
+
 // ---- Stub auth (dev only) ----
 app.post("/auth/signup", async () => {
-  return { userId: "dev-user-1" };
+  return { userId: DEV_USER_ID };
 });
 
 app.post("/auth/login", async () => {
-  return { userId: "dev-user-1" };
+  return { userId: DEV_USER_ID };
 });
 
 app.get("/me", async () => {
-  return { userId: "dev-user-1", email: "dev@example.com" };
+  return { userId: DEV_USER_ID, email: "dev@example.com" };
 });
 
 // ---- Proxy helpers ----
@@ -112,7 +179,67 @@ async function proxyJson(req: { method: string; path: string; body?: any }) {
   return { status: res.status, json };
 }
 
-// ---- Strategies + logs (proxy to runner) ----
+// ---- Strategy catalog (local files) ----
+app.get("/strategy-catalog", async () => {
+  return { strategies: readStrategyCatalog() };
+});
+
+// ---- My Strategies (in-memory, per dev user) ----
+app.get("/my-strategies", async () => {
+  const list = Array.from(myStrategies.values()).filter((s) => s.userId === DEV_USER_ID);
+  return { strategies: list };
+});
+
+app.post<{ Body: { strategyId: string; nickname?: string; config?: any } }>(
+  "/my-strategies",
+  async (request, reply) => {
+    const strategyId = request.body?.strategyId;
+    if (!strategyId) return reply.code(400).send({ ok: false, error: "missing_strategyId" });
+
+    const id = crypto.randomUUID();
+    const now = Date.now();
+    const rec: MyStrategy = {
+      id,
+      userId: DEV_USER_ID,
+      strategyId,
+      nickname: request.body?.nickname,
+      enabled: false,
+      config: request.body?.config ?? {},
+      createdAt: now,
+      updatedAt: now
+    };
+    myStrategies.set(id, rec);
+    return reply.code(200).send({ ok: true, strategy: rec });
+  }
+);
+
+app.patch<{ Params: { id: string }; Body: { enabled?: boolean; config?: any; nickname?: string } }>(
+  "/my-strategies/:id",
+  async (request, reply) => {
+    const rec = myStrategies.get(request.params.id);
+    if (!rec || rec.userId !== DEV_USER_ID) return reply.code(404).send({ ok: false, error: "not_found" });
+
+    const next: MyStrategy = {
+      ...rec,
+      enabled: typeof request.body?.enabled === "boolean" ? request.body.enabled : rec.enabled,
+      nickname: typeof request.body?.nickname === "string" ? request.body.nickname : rec.nickname,
+      config: typeof request.body?.config === "object" && request.body.config ? request.body.config : rec.config,
+      updatedAt: Date.now()
+    };
+    myStrategies.set(next.id, next);
+    return reply.code(200).send({ ok: true, strategy: next });
+  }
+);
+
+app.delete<{ Params: { id: string } }>("/my-strategies/:id", async (request, reply) => {
+  const rec = myStrategies.get(request.params.id);
+  if (!rec || rec.userId !== DEV_USER_ID) return reply.code(404).send({ ok: false, error: "not_found" });
+
+  myStrategies.delete(request.params.id);
+  return reply.code(200).send({ ok: true });
+});
+
+// ---- Runner strategies + logs (proxy to runner) ----
 app.get("/strategies", async (_request, reply) => {
   const out = await proxyJson({ method: "GET", path: "/strategies" });
   return reply.code(out.status).send(out.json);

@@ -1,0 +1,16 @@
+{
+  "id": "toy-random-walk",
+  "name": "Toy Random Walk",
+  "description": "Demo strategy for testing event pipeline",
+  "tags": ["demo", "paper"],
+  "author": "polystrat",
+  "license": "internal",
+  "sourceUrl": "",
+  "paramsSchema": [
+    { "key": "marketId", "type": "string", "default": "TEST-MARKET" },
+    { "key": "tickMs", "type": "number", "default": 2000 },
+    { "key": "jumpThreshold", "type": "number", "default": 0.06 },
+    { "key": "basePrice", "type": "number", "default": 0.5 },
+    { "key": "size", "type": "number", "default": 5 }
+  ]
+}
