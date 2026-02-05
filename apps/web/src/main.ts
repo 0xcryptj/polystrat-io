@@ -1507,18 +1507,12 @@ async function render() {
     return;
   }
 
-  // Token gate (platform access): allow login + credits + wallets, but block platform features
-  // Token gate (temporarily disabled by default server-side). If the API says allowed=true, we treat it as open.
+  // Token gate is removed for now.
+  // We still call /gating/status for future use + UI display, but we do not block routes.
   const gate = await getGateStatus();
   const allowed = gate?.allowed ?? null;
 
-  const gatedRoutes = ["markets", "analytics", "traders", "bot-config", "notifications", "dashboard"];
-  const isGatedRoute = gatedRoutes.some((p) => route === p || route.startsWith(p + "/"));
-
-  if (session && isGatedRoute && allowed === false) {
-    location.hash = "#access-required";
-  }
-
+  // access-required route is kept but should be unreachable while gating is disabled
   if (route === "access-required") {
     const content = el("div", {}, renderAccessRequired(el, gate?.reason));
     app.append(appShell({ email, gateAllowed: allowed }, content));

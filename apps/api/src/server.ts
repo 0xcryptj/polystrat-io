@@ -92,6 +92,10 @@ const server = http.createServer(async (req, res) => {
   // Token gating status (auth required; NOT gated)
   if (req.method === "GET" && url.pathname === "/gating/status") {
     try {
+      // If the gate is disabled, report allowed=true so the UI doesn't lock users out.
+      const enabled = String(process.env.GATE_ENABLED ?? "false").toLowerCase() === "true";
+      if (!enabled) return json(res, 200, { allowed: true, reason: "gate_disabled" });
+
       const u = await requireUser(req);
       const sb = makeUserSupabaseClient(u.accessToken);
       const { data, error } = await sb.from("wallets").select("id,user_id,chain,address,created_at");
