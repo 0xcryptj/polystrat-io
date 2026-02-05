@@ -42,8 +42,16 @@ async function readJsonBody(req: http.IncomingMessage): Promise<any> {
   });
 }
 
-function setCors(res: http.ServerResponse) {
-  res.setHeader("access-control-allow-origin", "*");
+const WEB_ORIGIN = String(process.env.WEB_ORIGIN ?? "http://127.0.0.1:5173");
+
+function setCors(req: http.IncomingMessage, res: http.ServerResponse) {
+  // For cookie auth, we must NOT use "*". Reflect/allowlist the dev origin.
+  const origin = String(req.headers.origin ?? "");
+  const allow = origin && origin === WEB_ORIGIN ? origin : WEB_ORIGIN;
+
+  res.setHeader("access-control-allow-origin", allow);
+  res.setHeader("vary", "origin");
+  res.setHeader("access-control-allow-credentials", "true");
   res.setHeader("access-control-allow-methods", "GET,POST,PUT,DELETE,OPTIONS");
   res.setHeader("access-control-allow-headers", "content-type");
 }
@@ -69,7 +77,7 @@ async function checkTokenGate(solAddress: string): Promise<{ allowed: boolean; r
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
 
-  setCors(res);
+  setCors(req, res);
   if (req.method === "OPTIONS") return res.end();
 
   // --- Boot ---
