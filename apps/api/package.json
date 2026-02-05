@@ -4,11 +4,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx --watch src/server.ts"
+    "dev": "tsx --watch src/server.ts",
+    "test": "tsx src/auth/solana.test.ts && tsx src/solana/rpc.test.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.94.0",
+    "better-sqlite3": "^12.6.2",
     "bs58": "^6.0.0",
+    "cookie": "^1.1.1",
     "dotenv": "^16.6.1",
     "ethers": "^6.16.0",
     "jose": "^5.10.0",

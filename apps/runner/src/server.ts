@@ -5,6 +5,7 @@ import { MockMarketDataProvider } from "./providers/mock.js";
 import { PolymarketMarketDataProvider } from "./providers/polymarket.js";
 import { getStrategyRegistry } from "./strategies/registry.js";
 import { validateConfig } from "./strategies/configValidate.js";
+import { startPaperRun, stopPaperRun, getPaperStatus, getPaperPnl } from "./paper/paperRunner.js";
 
 const PORT = Number(process.env.PORT ?? 3344);
 
@@ -259,6 +260,55 @@ const server = http.createServer(async (req, res) => {
       },
       events: store.recent(limit)
     });
+  }
+
+  // Paper runner control (per-user)
+  if (req.method === "POST" && url.pathname === "/paper/start") {
+    let body = "";
+    req.on("data", (c) => (body += c));
+    req.on("end", () => {
+      let j: any = {};
+      try {
+        j = body ? JSON.parse(body) : {};
+      } catch {
+        return json(res, 400, { ok: false, error: "invalid_json" });
+      }
+      const userId = String(j?.userId ?? "").trim();
+      if (!userId) return json(res, 400, { ok: false, error: "missing_userId" });
+      startPaperRun(userId);
+      return json(res, 200, { ok: true, status: getPaperStatus(userId) });
+    });
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/paper/stop") {
+    let body = "";
+    req.on("data", (c) => (body += c));
+    req.on("end", () => {
+      let j: any = {};
+      try {
+        j = body ? JSON.parse(body) : {};
+      } catch {
+        return json(res, 400, { ok: false, error: "invalid_json" });
+      }
+      const userId = String(j?.userId ?? "").trim();
+      if (!userId) return json(res, 400, { ok: false, error: "missing_userId" });
+      stopPaperRun(userId);
+      return json(res, 200, { ok: true, status: getPaperStatus(userId) });
+    });
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/paper/status") {
+    const userId = String(url.searchParams.get("userId") ?? "").trim();
+    if (!userId) return json(res, 400, { ok: false, error: "missing_userId" });
+    return json(res, 200, { ok: true, status: getPaperStatus(userId) });
+  }
+
+  if (req.method === "GET" && url.pathname === "/paper/pnl") {
+    const userId = String(url.searchParams.get("userId") ?? "").trim();
+    if (!userId) return json(res, 400, { ok: false, error: "missing_userId" });
+    return json(res, 200, getPaperPnl(userId));
   }
 
   if (req.method === "GET" && url.pathname === "/health") {

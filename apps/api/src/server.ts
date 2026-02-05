@@ -1,17 +1,21 @@
 import "dotenv/config";
 import http from "node:http";
-import { buildPolymarketDocsIndex } from "./docsIndex.js";
-import { deleteTrader, listTraders, upsertTrader } from "./traders/store.js";
-import { getTraderPositionsFromPolymarket, getTraderStatsFromPolymarket, getTraderTradesFromPolymarket } from "./traders/polymarket.js";
-import { getMarketBySlug, getOrderbookByTokenId, listMarkets } from "./polymarket/public.js";
-import { verifySupabaseJwt } from "./auth/supabase.js";
-import { makeUserSupabaseClient } from "./wallets/supabase.js";
-import { verifyWalletLink } from "./wallets/verify.js";
-import { getGatingStatus } from "./gating/index.js";
-import { requireTokenGate } from "./gating/middleware.js";
+import { randomUUID } from "node:crypto";
+import { serialize as serializeCookie } from "cookie";
+
+import { migrate, openDb } from "./db/db.js";
+import { verifySolanaMessageSignature } from "./auth/solana.js";
+import { signSession } from "./auth/session.js";
+import { requireSession } from "./auth/middleware.js";
+import { getSplTokenBalance, getSplTokenDecimals } from "./solana/rpc.js";
+
 import { runnerGet, runnerPost } from "./runnerProxy.js";
 
 const PORT = Number(process.env.PORT ?? 3399);
+
+// Non-secret config (allowed): SPL mint, min amount, RPC URL
+const GATE_MINT = String(process.env.GATE_MINT ?? "").trim();
+const GATE_MIN_AMOUNT = String(process.env.GATE_MIN_AMOUNT ?? "1").trim(); // UI-friendly, e.g. "1" token
 
 function json(res: http.ServerResponse, code: number, body: any) {
   res.statusCode = code;
@@ -23,20 +27,6 @@ function notFound(res: http.ServerResponse) {
   json(res, 404, { error: "not_found" });
 }
 
-function clampInt(n: number, min: number, max: number) {
-  if (!Number.isFinite(n)) return min;
-  return Math.max(min, Math.min(max, Math.floor(n)));
-}
-
-async function requireUser(req: http.IncomingMessage): Promise<{ userId: string; email: string | null; accessToken: string }> {
-  const auth = String(req.headers.authorization ?? "");
-  const m = auth.match(/^Bearer\s+(.+)$/i);
-  if (!m) throw new Error("missing_authorization");
-  const token = m[1];
-  const user = await verifySupabaseJwt(token);
-  return { userId: user.userId, email: user.email, accessToken: token };
-}
-
 async function readJsonBody(req: http.IncomingMessage): Promise<any> {
   return await new Promise((resolve, reject) => {
     let body = "";
@@ -44,7 +34,7 @@ async function readJsonBody(req: http.IncomingMessage): Promise<any> {
     req.on("end", () => {
       try {
         resolve(body ? JSON.parse(body) : {});
-      } catch (e) {
+      } catch {
         reject(new Error("invalid_json"));
       }
     });
@@ -52,307 +42,273 @@ async function readJsonBody(req: http.IncomingMessage): Promise<any> {
   });
 }
 
+function setCors(res: http.ServerResponse) {
+  res.setHeader("access-control-allow-origin", "*");
+  res.setHeader("access-control-allow-methods", "GET,POST,PUT,DELETE,OPTIONS");
+  res.setHeader("access-control-allow-headers", "content-type");
+}
+
+function requireGateConfigured() {
+  if (!GATE_MINT) throw new Error("gate_mint_not_configured");
+}
+
+async function checkTokenGate(solAddress: string): Promise<{ allowed: boolean; reason?: string; balanceRaw?: string; decimals?: number }> {
+  requireGateConfigured();
+
+  const decimals = await getSplTokenDecimals({ mint: GATE_MINT });
+  const bal = await getSplTokenBalance({ owner: solAddress, mint: GATE_MINT });
+
+  // Convert min amount (string tokens) -> raw units bigint
+  const minTokens = Number(GATE_MIN_AMOUNT);
+  const minRaw = BigInt(Math.floor(minTokens * 10 ** decimals));
+
+  const allowed = bal >= minRaw;
+  return { allowed, reason: allowed ? "ok" : "insufficient_token_balance", balanceRaw: bal.toString(), decimals };
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
 
-  // Basic CORS for local dev
-  res.setHeader("access-control-allow-origin", "*");
-  res.setHeader("access-control-allow-methods", "GET,POST,OPTIONS");
-  res.setHeader("access-control-allow-headers", "content-type");
+  setCors(res);
   if (req.method === "OPTIONS") return res.end();
 
-  if (req.method === "GET" && url.pathname === "/docs/polymarket") {
-    const index = await buildPolymarketDocsIndex();
-    return json(res, 200, index);
+  // --- Boot ---
+  if (req.method === "GET" && url.pathname === "/health") {
+    return json(res, 200, { ok: true });
   }
 
-  // Auth (read-only): verify Supabase JWT and return basic identity
-  if (req.method === "GET" && url.pathname === "/me") {
-    try {
-      const u = await requireUser(req);
-      return json(res, 200, { userId: u.userId, email: u.email });
-    } catch (e: any) {
-      return json(res, 401, { error: "unauthorized", message: String(e?.message ?? e) });
-    }
-  }
-
-  // Wallet linking (read-only)
-  if (req.method === "GET" && url.pathname === "/wallets") {
-    try {
-      const u = await requireUser(req);
-      const sb = makeUserSupabaseClient(u.accessToken);
-      const { data, error } = await sb.from("wallets").select("id,user_id,chain,address,created_at").order("created_at", { ascending: false });
-      if (error) return json(res, 400, { error: "supabase_error", message: error.message });
-      return json(res, 200, { wallets: data ?? [] });
-    } catch (e: any) {
-      return json(res, 401, { error: "unauthorized", message: String(e?.message ?? e) });
-    }
-  }
-
-  // Token gating status (auth required; NOT gated)
-  if (req.method === "GET" && url.pathname === "/gating/status") {
-    try {
-      // If the gate is disabled, report allowed=true so the UI doesn't lock users out.
-      const enabled = String(process.env.GATE_ENABLED ?? "false").toLowerCase() === "true";
-      if (!enabled) return json(res, 200, { allowed: true, reason: "gate_disabled" });
-
-      const u = await requireUser(req);
-      const sb = makeUserSupabaseClient(u.accessToken);
-      const { data, error } = await sb.from("wallets").select("id,user_id,chain,address,created_at");
-      if (error) return json(res, 400, { error: "supabase_error", message: error.message });
-      const status = await getGatingStatus({ wallets: (data ?? []) as any });
-      return json(res, 200, status);
-    } catch (e: any) {
-      return json(res, 401, { error: "unauthorized", message: String(e?.message ?? e) });
-    }
-  }
-
-  if (req.method === "POST" && url.pathname === "/wallets/link") {
-    try {
-      const u = await requireUser(req);
-      const body = await readJsonBody(req);
-
-      const chain = String(body?.chain ?? "");
-      const address = String(body?.address ?? "");
-      const message = String(body?.message ?? "");
-      const signature = String(body?.signature ?? "");
-
-      if (chain !== "evm" && chain !== "sol") return json(res, 400, { error: "invalid_chain" });
-
-      // Verify ownership (no storage of signature beyond verification)
-      const v = verifyWalletLink({ chain: chain as any, address, message, signature });
-      if (!v.ok) return json(res, 400, { error: "invalid_signature", message: v.error });
-
-      // Bind the signed message to this user to avoid trivial cross-user replay.
-      if (!message.includes(u.userId)) {
-        return json(res, 400, { error: "message_missing_user_id", message: "link message must include the userId" });
-      }
-
-      const sb = makeUserSupabaseClient(u.accessToken);
-      const { data, error } = await sb
-        .from("wallets")
-        .insert({ user_id: u.userId, chain, address })
-        .select("id,user_id,chain,address,created_at")
-        .single();
-
-      if (error) return json(res, 400, { error: "supabase_error", message: error.message });
-      return json(res, 200, { ok: true, wallet: data });
-    } catch (e: any) {
-      const msg = String(e?.message ?? e);
-      const code = msg.includes("missing_authorization") ? 401 : 400;
-      return json(res, code, { error: "bad_request", message: msg });
-    }
-  }
-
-  const delWallet = url.pathname.match(/^\/wallets\/([^/]+)$/);
-  if (req.method === "DELETE" && delWallet) {
-    try {
-      const u = await requireUser(req);
-      const id = decodeURIComponent(delWallet[1]);
-      const sb = makeUserSupabaseClient(u.accessToken);
-      const { error } = await sb.from("wallets").delete().eq("id", id);
-      if (error) return json(res, 400, { error: "supabase_error", message: error.message });
-      return json(res, 200, { ok: true });
-    } catch (e: any) {
-      return json(res, 401, { error: "unauthorized", message: String(e?.message ?? e) });
-    }
-  }
-
-  // Trader Profiles (in-memory)
-  if (req.method === "GET" && url.pathname === "/traders") {
-    return json(res, 200, { traders: listTraders() });
-  }
-
-  if (req.method === "POST" && url.pathname === "/traders") {
+  // --- Auth: Solana token-gated session ---
+  // 1) Client requests nonce
+  if (req.method === "POST" && url.pathname === "/auth/nonce") {
     try {
       const body = await readJsonBody(req);
-      const profile = upsertTrader({ address: String(body?.address ?? ""), nickname: body?.nickname ? String(body.nickname) : undefined });
-      return json(res, 200, { ok: true, trader: profile });
+      const solAddress = String(body?.address ?? "").trim();
+      if (!solAddress) return json(res, 400, { ok: false, error: "missing_address" });
+
+      requireGateConfigured();
+
+      const nonce = randomUUID();
+      const expiresAt = Date.now() + 5 * 60_000;
+      const message = `polystrat login\naddress: ${solAddress}\nnonce: ${nonce}`;
+
+      const db = openDb();
+      migrate(db);
+      db.prepare(
+        "insert into nonces(sol_address, nonce, message, expires_at) values(?,?,?,?) on conflict(sol_address) do update set nonce=excluded.nonce, message=excluded.message, expires_at=excluded.expires_at"
+      ).run(solAddress, nonce, message, expiresAt);
+
+      return json(res, 200, { ok: true, nonce, message, expiresAt });
     } catch (e: any) {
       return json(res, 400, { ok: false, error: String(e?.message ?? e) });
     }
   }
 
-  const del = url.pathname.match(/^\/traders\/([^/]+)$/);
-  if (req.method === "DELETE" && del) {
-    const address = decodeURIComponent(del[1]);
-    const ok = deleteTrader(address);
-    return json(res, 200, { ok });
+  // 2) Client signs message containing nonce; server verifies signature + token balance; issues cookie
+  if (req.method === "POST" && url.pathname === "/auth/verify") {
+    try {
+      const body = await readJsonBody(req);
+      const solAddress = String(body?.address ?? "").trim();
+      const signature = String(body?.signature ?? "").trim(); // base64
+
+      if (!solAddress || !signature) return json(res, 400, { ok: false, error: "missing_address_or_signature" });
+
+      const db = openDb();
+      migrate(db);
+      const row = db.prepare("select nonce, message, expires_at from nonces where sol_address=?").get(solAddress) as any;
+      if (!row) return json(res, 400, { ok: false, error: "missing_nonce" });
+      if (Date.now() > Number(row.expires_at)) return json(res, 400, { ok: false, error: "nonce_expired" });
+
+      const message = String(row.message ?? "");
+      if (!message) return json(res, 400, { ok: false, error: "missing_message" });
+
+      const okSig = verifySolanaMessageSignature({ address: solAddress, message, signatureBase64: signature });
+      if (!okSig) return json(res, 401, { ok: false, error: "invalid_signature" });
+
+      const gate = await checkTokenGate(solAddress);
+      if (!gate.allowed) return json(res, 403, { ok: false, error: "token_gate_failed", gate });
+
+      // upsert user
+      const userId = `u_${solAddress}`;
+      db.prepare("insert into users(id, sol_address, created_at) values(?,?,?) on conflict(id) do nothing")
+        .run(userId, solAddress, Date.now());
+
+      // consume nonce
+      db.prepare("delete from nonces where sol_address=?").run(solAddress);
+
+      const jwt = await signSession({ sub: userId, sol: solAddress });
+      // NOTE: For Vite dev, we can't reliably use SameSite=None without https.
+      const cookie = serializeCookie("ps_session", jwt, {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+        maxAge: 60 * 60 * 24 * 7
+      });
+      res.setHeader("set-cookie", cookie);
+
+      return json(res, 200, { ok: true, userId, solAddress, gate });
+    } catch (e: any) {
+      return json(res, 400, { ok: false, error: String(e?.message ?? e) });
+    }
   }
 
-  // Runner proxy (token-gated)
-  if (url.pathname === "/runner/strategies" && req.method === "GET") {
-    let u: any;
+  if (req.method === "POST" && url.pathname === "/auth/logout") {
+    res.setHeader(
+      "set-cookie",
+      serializeCookie("ps_session", "", {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+        maxAge: 0
+      })
+    );
+    return json(res, 200, { ok: true });
+  }
+
+  if (req.method === "GET" && url.pathname === "/me") {
     try {
-      u = await requireUser(req);
+      const s = await requireSession(req);
+      return json(res, 200, { ok: true, userId: s.userId, solAddress: s.solAddress });
+    } catch {
+      return json(res, 401, { ok: false, error: "unauthorized" });
+    }
+  }
+
+  // --- Strategy dashboard routes (protected) ---
+  if (req.method === "GET" && url.pathname === "/strategies") {
+    // proxy to runner; must be authenticated + token-gated via login
+    try {
+      await requireSession(req);
     } catch {
       return json(res, 401, { error: "unauthorized" });
     }
-    const gate = await requireTokenGate({ req, accessToken: u.accessToken });
-    if (!gate.allowed) return json(res, 403, gate.status);
-
     const r = await runnerGet("/strategies");
     res.statusCode = r.status;
     res.setHeader("content-type", r.contentType);
     return res.end(r.text);
   }
 
-  const rStart = url.pathname.match(/^\/runner\/strategies\/([^/]+)\/start$/);
-  if (rStart && req.method === "POST") {
-    let u: any;
+  // tracked wallets CRUD
+  if (req.method === "GET" && url.pathname === "/tracked-wallets") {
     try {
-      u = await requireUser(req);
+      const s = await requireSession(req);
+      const db = openDb();
+      migrate(db);
+      const wallets = db
+        .prepare("select id, chain, address, paused, created_at from tracked_wallets where user_id=? order by created_at desc")
+        .all(s.userId)
+        .map((w: any) => ({ ...w, paused: Boolean(w.paused) }));
+      return json(res, 200, { wallets });
     } catch {
       return json(res, 401, { error: "unauthorized" });
     }
-    const gate = await requireTokenGate({ req, accessToken: u.accessToken });
-    if (!gate.allowed) return json(res, 403, gate.status);
-
-    const id = decodeURIComponent(rStart[1]);
-    const body = await readJsonBody(req);
-    const r = await runnerPost(`/strategies/${encodeURIComponent(id)}/start`, body);
-    res.statusCode = r.status;
-    res.setHeader("content-type", r.contentType);
-    return res.end(r.text);
   }
 
-  const rStop = url.pathname.match(/^\/runner\/strategies\/([^/]+)\/stop$/);
-  if (rStop && req.method === "POST") {
-    let u: any;
+  if (req.method === "POST" && url.pathname === "/tracked-wallets") {
     try {
-      u = await requireUser(req);
-    } catch {
-      return json(res, 401, { error: "unauthorized" });
-    }
-    const gate = await requireTokenGate({ req, accessToken: u.accessToken });
-    if (!gate.allowed) return json(res, 403, gate.status);
+      const s = await requireSession(req);
+      const body = await readJsonBody(req);
 
-    const id = decodeURIComponent(rStop[1]);
-    const r = await runnerPost(`/strategies/${encodeURIComponent(id)}/stop`, {});
-    res.statusCode = r.status;
-    res.setHeader("content-type", r.contentType);
-    return res.end(r.text);
-  }
+      const chain = String(body?.chain ?? "").trim();
+      const address = String(body?.address ?? "").trim();
+      if (!chain || !address) return json(res, 400, { ok: false, error: "missing_chain_or_address" });
 
-  if (url.pathname === "/runner/logs" && req.method === "GET") {
-    let u: any;
-    try {
-      u = await requireUser(req);
-    } catch {
-      return json(res, 401, { error: "unauthorized" });
-    }
-    const gate = await requireTokenGate({ req, accessToken: u.accessToken });
-    if (!gate.allowed) return json(res, 403, gate.status);
+      const db = openDb();
+      migrate(db);
+      const id = randomUUID();
+      db.prepare("insert into tracked_wallets(id, user_id, chain, address, paused, created_at) values(?,?,?,?,?,?)")
+        .run(id, s.userId, chain, address, 0, Date.now());
 
-    const limit = url.searchParams.get("limit") ?? "200";
-    const r = await runnerGet(`/logs?limit=${encodeURIComponent(limit)}`);
-    res.statusCode = r.status;
-    res.setHeader("content-type", r.contentType);
-    return res.end(r.text);
-  }
-
-  // Polymarket (READ-ONLY) — proxy + normalize (gated behind Supabase auth + token gate)
-  if (req.method === "GET" && url.pathname === "/polymarket/markets") {
-    let u: any;
-    try {
-      u = await requireUser(req);
+      return json(res, 200, { ok: true, id });
     } catch (e: any) {
-      return json(res, 401, { error: "unauthorized", message: "missing/invalid Authorization Bearer token" });
+      const msg = String(e?.message ?? e);
+      return json(res, 400, { ok: false, error: msg.includes("UNIQUE") ? "already_tracked" : msg });
     }
-
-    const gate = await requireTokenGate({ req, accessToken: u.accessToken });
-    if (!gate.allowed) return json(res, 403, gate.status);
-
-    const limit = Number(url.searchParams.get("limit") ?? 50);
-    const query = String(url.searchParams.get("query") ?? "").trim().toLowerCase();
-
-    const markets = await listMarkets({
-      limit: clampInt(limit, 0, 200),
-      offset: 0,
-      closed: false,
-      includeTag: true
-    });
-
-    const filtered = query
-      ? markets.filter((m) => (m.question ?? "").toLowerCase().includes(query) || (m.slug ?? "").toLowerCase().includes(query))
-      : markets;
-
-    return json(res, 200, { markets: filtered });
   }
 
-  const mMarket = url.pathname.match(/^\/polymarket\/market\/([^/]+)$/);
-  if (req.method === "GET" && mMarket) {
-    let u: any;
+  const pauseMatch = url.pathname.match(/^\/tracked-wallets\/([^/]+)\/pause$/);
+  if (req.method === "POST" && pauseMatch) {
     try {
-      u = await requireUser(req);
+      const s = await requireSession(req);
+      const id = decodeURIComponent(pauseMatch[1]);
+      const body = await readJsonBody(req);
+      const paused = Boolean(body?.paused);
+      const db = openDb();
+      migrate(db);
+      db.prepare("update tracked_wallets set paused=? where id=? and user_id=?").run(paused ? 1 : 0, id, s.userId);
+      return json(res, 200, { ok: true });
     } catch {
       return json(res, 401, { error: "unauthorized" });
     }
-
-    const gate = await requireTokenGate({ req, accessToken: u.accessToken });
-    if (!gate.allowed) return json(res, 403, gate.status);
-
-    const marketId = decodeURIComponent(mMarket[1]);
-    // Based on pasted docs, we only have a market-by-slug endpoint.
-    const m = await getMarketBySlug(marketId, true);
-    return json(res, 200, m);
   }
 
-  const mBook = url.pathname.match(/^\/polymarket\/orderbook\/([^/]+)$/);
-  if (req.method === "GET" && mBook) {
-    let u: any;
+  const delMatch = url.pathname.match(/^\/tracked-wallets\/([^/]+)$/);
+  if (req.method === "DELETE" && delMatch) {
     try {
-      u = await requireUser(req);
+      const s = await requireSession(req);
+      const id = decodeURIComponent(delMatch[1]);
+      const db = openDb();
+      migrate(db);
+      db.prepare("delete from tracked_wallets where id=? and user_id=?").run(id, s.userId);
+      return json(res, 200, { ok: true });
     } catch {
       return json(res, 401, { error: "unauthorized" });
     }
-
-    const gate = await requireTokenGate({ req, accessToken: u.accessToken });
-    if (!gate.allowed) return json(res, 403, gate.status);
-
-    const tokenId = decodeURIComponent(mBook[1]);
-    // Docs explicitly define orderbook by token_id. We do NOT guess market->token mapping here.
-    const book = await getOrderbookByTokenId(tokenId);
-    return json(res, 200, book);
   }
 
-  if (req.method === "GET" && url.pathname.startsWith("/polymarket/trades/")) {
-    return json(res, 501, {
-      error: "not_implemented",
-      message: "Trades endpoint docs not pasted yet (need path + schema)."
-    });
+  // Paper runner control (protected)
+  if (req.method === "POST" && url.pathname === "/paper/start") {
+    try {
+      const s = await requireSession(req);
+      const r = await runnerPost("/paper/start", { userId: s.userId });
+      res.statusCode = r.status;
+      res.setHeader("content-type", r.contentType);
+      return res.end(r.text);
+    } catch {
+      return json(res, 401, { error: "unauthorized" });
+    }
   }
 
-  // Trader read-only Polymarket data (pending docs)
-  const traderStats = url.pathname.match(/^\/traders\/([^/]+)\/stats$/);
-  if (req.method === "GET" && traderStats) {
-    const address = decodeURIComponent(traderStats[1]);
-    const stats = await getTraderStatsFromPolymarket(address);
-    return json(res, 200, stats);
+  if (req.method === "POST" && url.pathname === "/paper/stop") {
+    try {
+      const s = await requireSession(req);
+      const r = await runnerPost("/paper/stop", { userId: s.userId });
+      res.statusCode = r.status;
+      res.setHeader("content-type", r.contentType);
+      return res.end(r.text);
+    } catch {
+      return json(res, 401, { error: "unauthorized" });
+    }
   }
 
-  const traderPositions = url.pathname.match(/^\/traders\/([^/]+)\/positions$/);
-  if (req.method === "GET" && traderPositions) {
-    const address = decodeURIComponent(traderPositions[1]);
-    const positions = await getTraderPositionsFromPolymarket(address);
-    return json(res, 200, positions);
+  if (req.method === "GET" && url.pathname === "/paper/status") {
+    try {
+      const s = await requireSession(req);
+      const r = await runnerGet(`/paper/status?userId=${encodeURIComponent(s.userId)}`);
+      res.statusCode = r.status;
+      res.setHeader("content-type", r.contentType);
+      return res.end(r.text);
+    } catch {
+      return json(res, 401, { error: "unauthorized" });
+    }
   }
 
-  const traderTrades = url.pathname.match(/^\/traders\/([^/]+)\/trades$/);
-  if (req.method === "GET" && traderTrades) {
-    const address = decodeURIComponent(traderTrades[1]);
-    const limit = Number(url.searchParams.get("limit") ?? 50);
-    const trades = await getTraderTradesFromPolymarket(address, Number.isFinite(limit) ? limit : 50);
-    return json(res, 200, trades);
-  }
-
-  if (req.method === "GET" && url.pathname === "/health") {
-    return json(res, 200, { ok: true });
+  if (req.method === "GET" && url.pathname === "/paper/pnl") {
+    try {
+      const s = await requireSession(req);
+      const r = await runnerGet(`/paper/pnl?userId=${encodeURIComponent(s.userId)}`);
+      res.statusCode = r.status;
+      res.setHeader("content-type", r.contentType);
+      return res.end(r.text);
+    } catch {
+      return json(res, 401, { error: "unauthorized" });
+    }
   }
 
   return notFound(res);
 });
 
 server.listen(PORT, () => {
+  const db = openDb();
+  migrate(db);
   console.log(`[api] listening on http://localhost:${PORT}`);
 });

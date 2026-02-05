@@ -16,3 +16,6 @@ moltbook_register_*.txt
 
 # Local agent memory/journal
 memory/
+
+# Local DB
+apps/api/data/

@@ -8,7 +8,8 @@
     "qa:strategies": "tsx src/strategies/qaHarness.ts"
   },
   "dependencies": {
-    "@polystrat/strategy-sdk": "*"
+    "@polystrat/strategy-sdk": "*",
+    "better-sqlite3": "^12.6.2"
   },
   "devDependencies": {
     "tsx": "^4.19.2"
