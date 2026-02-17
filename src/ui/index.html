@@ -1,0 +1,585 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Polymarket Bot 5M BTC</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet" />
+    <style>
+      :root {
+        --bg: #050508;
+        --bg-panel: #0a0a0f;
+        --bg-card: #0d0d12;
+        --border: #1a1a24;
+        --neon: #00ff88;
+        --neon-dim: rgba(0, 255, 136, 0.15);
+        --neon-glow: 0 0 12px rgba(0, 255, 136, 0.3);
+        --danger: #ff4444;
+        --danger-dim: rgba(255, 68, 68, 0.15);
+        --text: #c8c8d0;
+        --text-muted: #6b6b78;
+      }
+
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body {
+        font-family: 'JetBrains Mono', 'Share Tech Mono', monospace;
+        background: var(--bg);
+        color: var(--text);
+        min-height: 100vh;
+        font-size: 13px;
+      }
+
+      .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 16px 24px;
+        border-bottom: 1px solid var(--border);
+        background: var(--bg-panel);
+      }
+      .header-left {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .logo {
+        font-size: 1.25rem;
+        font-weight: 700;
+        color: var(--neon);
+        text-shadow: var(--neon-glow);
+        letter-spacing: 0.05em;
+      }
+      .logo::before { content: '⚡ '; }
+      .header-right {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+      }
+      .status-badge {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 14px;
+        background: var(--neon-dim);
+        border: 1px solid var(--neon);
+        border-radius: 6px;
+        color: var(--neon);
+        font-weight: 600;
+        font-size: 0.75rem;
+      }
+      .status-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--neon);
+        box-shadow: 0 0 8px var(--neon);
+        animation: pulse 2s infinite;
+      }
+      @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+      .status-offline .status-dot { background: var(--danger); }
+      .status-offline { border-color: var(--danger); color: var(--danger); background: var(--danger-dim); }
+
+      .kpi-row {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 16px;
+        padding: 20px 24px;
+        background: var(--bg-panel);
+      }
+      .kpi-card {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 16px;
+      }
+      .kpi-label {
+        font-size: 0.65rem;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: var(--text-muted);
+        margin-bottom: 6px;
+      }
+      .kpi-value {
+        font-size: 1.25rem;
+        font-weight: 600;
+        color: var(--neon);
+      }
+      .kpi-value.negative { color: var(--danger); }
+      .kpi-sub { font-size: 0.7rem; color: var(--text-muted); margin-top: 4px; }
+
+      .main-grid {
+        display: grid;
+        grid-template-columns: 1fr 320px;
+        gap: 0;
+        min-height: calc(100vh - 180px);
+      }
+      .main-left {
+        padding: 20px 24px;
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+      }
+      .main-right {
+        padding: 20px;
+        border-left: 1px solid var(--border);
+        background: var(--bg-panel);
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+      }
+
+      .panel {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+      .panel-title {
+        padding: 12px 16px;
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: var(--neon);
+        border-bottom: 1px solid var(--border);
+      }
+      .panel-body { padding: 16px; }
+
+      .balance-chart-wrap { height: 220px; padding: 16px; }
+      .pnl-chart-wrap { height: 140px; padding: 16px; }
+
+      .metrics-list { list-style: none; }
+      .metrics-list li {
+        display: flex;
+        justify-content: space-between;
+        padding: 8px 0;
+        border-bottom: 1px solid rgba(255,255,255,0.04);
+        font-size: 0.8rem;
+      }
+      .metrics-list li:last-child { border-bottom: none; }
+      .metrics-list .label { color: var(--text-muted); }
+      .metrics-list .val { color: var(--neon); font-weight: 500; }
+      .metrics-list .val.neg { color: var(--danger); }
+
+      .positions-list, .trades-list {
+        max-height: 200px;
+        overflow-y: auto;
+        font-size: 0.75rem;
+      }
+      .positions-list .item, .trades-list .item {
+        padding: 10px 12px;
+        border-bottom: 1px solid rgba(255,255,255,0.04);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+      }
+      .trades-list .item { flex-wrap: wrap; }
+      .trades-list .action { color: var(--neon); font-weight: 600; }
+      .trades-list .pnl { font-weight: 600; }
+      .trades-list .pnl.pos { color: var(--neon); }
+      .trades-list .pnl.neg { color: var(--danger); }
+
+      .tier-tabs {
+        display: flex;
+        gap: 4px;
+        margin-bottom: 12px;
+      }
+      .tier-tabs button {
+        padding: 6px 12px;
+        font-family: inherit;
+        font-size: 0.75rem;
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        color: var(--text-muted);
+        cursor: pointer;
+        border-radius: 6px;
+      }
+      .tier-tabs button:hover { color: var(--text); border-color: var(--neon); }
+      .tier-tabs button.active {
+        background: var(--neon-dim);
+        border-color: var(--neon);
+        color: var(--neon);
+      }
+
+      .controls {
+        display: flex;
+        gap: 8px;
+        padding: 12px 24px;
+        background: var(--bg-panel);
+        border-bottom: 1px solid var(--border);
+      }
+      .controls button {
+        font-family: inherit;
+        padding: 8px 16px;
+        font-size: 0.8rem;
+        border-radius: 6px;
+        cursor: pointer;
+        border: 1px solid var(--border);
+        background: var(--bg-card);
+        color: var(--text);
+      }
+      .controls button:hover { border-color: var(--neon); color: var(--neon); }
+      .controls button.primary {
+        background: var(--neon);
+        border-color: var(--neon);
+        color: var(--bg);
+      }
+
+      .slug-bar {
+        display: flex;
+        gap: 8px;
+        padding: 12px 24px;
+        background: var(--bg-panel);
+        border-bottom: 1px solid var(--border);
+      }
+      .slug-bar input {
+        flex: 1;
+        max-width: 320px;
+        padding: 8px 12px;
+        font-family: inherit;
+        font-size: 0.8rem;
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        color: var(--text);
+        border-radius: 6px;
+      }
+      .slug-bar input:focus { outline: none; border-color: var(--neon); }
+      .slug-bar button {
+        padding: 8px 12px;
+        font-family: inherit;
+        font-size: 0.75rem;
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        color: var(--text-muted);
+        cursor: pointer;
+        border-radius: 6px;
+      }
+      .slug-bar button:hover { color: var(--neon); border-color: var(--neon); }
+
+      .gamma-result {
+        margin: 12px 24px;
+        padding: 12px;
+        background: var(--bg-card);
+        border-left: 3px solid var(--neon);
+        border-radius: 4px;
+        font-size: 0.8rem;
+      }
+      .gamma-result.error { border-left-color: var(--danger); }
+    </style>
+  </head>
+  <body>
+    <header class="header">
+      <div class="header-left">
+        <span class="logo">POLYMARKET BOT 5M BTC</span>
+      </div>
+      <div class="header-right">
+        <span class="kpi-sub" id="btcPrice" style="margin-right:12px">BTC —</span>
+        <div id="statusBadge" class="status-badge">
+          <span class="status-dot"></span>
+          <span>SYSTEM ONLINE</span>
+        </div>
+        <span class="kpi-sub" id="buildInfo">v0.1.0</span>
+      </div>
+    </header>
+
+    <div class="controls">
+      <button id="start" class="primary">Start</button>
+      <button id="stop">Stop</button>
+      <span style="color:var(--text-muted);font-size:0.75rem;align-self:center;">Mode: <span id="mode">dry-run</span> · WS: <span id="ws">—</span></span>
+    </div>
+
+    <div class="slug-bar">
+      <input type="text" id="slugInput" placeholder="Gamma slug (e.g. btc-updown-5m-1771297500)" />
+      <button id="lookupMarket">Market</button>
+      <button id="lookupEvent">Event</button>
+    </div>
+    <div id="gammaResult"></div>
+
+    <div class="kpi-row">
+      <div class="kpi-card">
+        <div class="kpi-label">Balance</div>
+        <div class="kpi-value" id="kpiBalance">$0.00</div>
+        <div class="kpi-sub">Start <span id="kpiStart">$85</span></div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">PNL</div>
+        <div class="kpi-value" id="kpiPnl">+$0.00</div>
+        <div class="kpi-sub" id="kpiRoi">+0%</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">ROI</div>
+        <div class="kpi-value" id="kpiRoiVal">+0%</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Win Rate</div>
+        <div class="kpi-value" id="kpiWinRate">—</div>
+        <div class="kpi-sub" id="kpiWl">0W / 0L</div>
+      </div>
+    </div>
+
+    <div class="tier-tabs" style="padding:0 24px 0;">
+      <button id="tier_t1" data-tier="t1">$1</button>
+      <button id="tier_t2" data-tier="t2">$2</button>
+      <button id="tier_t5" data-tier="t5" class="active">$5</button>
+    </div>
+
+    <div class="main-grid">
+      <div class="main-left">
+        <div class="panel">
+          <div class="panel-title">Balance Chart · Trade <span id="tradeCount">0</span> | Balance: <span id="chartBalance">$0</span></div>
+          <div class="balance-chart-wrap"><canvas id="balanceChart"></canvas></div>
+        </div>
+        <div class="panel">
+          <div class="panel-title">PNL Distribution · <span id="pnlSummary">0W / 0L | Avg: $0.00</span></div>
+          <div class="pnl-chart-wrap"><canvas id="pnlChart"></canvas></div>
+        </div>
+      </div>
+      <div class="main-right">
+        <div class="panel">
+          <div class="panel-title">Real-Time Metrics</div>
+          <div class="panel-body">
+            <ul class="metrics-list">
+              <li><span class="label">Total Trades</span><span class="val" id="mTotalTrades">0</span></li>
+              <li><span class="label">Closed Positions</span><span class="val" id="mClosed">0</span></li>
+              <li><span class="label">Wins / Losses</span><span class="val" id="mWl">0 / 0</span></li>
+              <li><span class="label">Avg Win</span><span class="val" id="mAvgWin">$0</span></li>
+              <li><span class="label">Avg Loss</span><span class="val neg" id="mAvgLoss">$0</span></li>
+              <li><span class="label">Largest Win</span><span class="val" id="mLargestWin">$0</span></li>
+              <li><span class="label">Largest Loss</span><span class="val neg" id="mLargestLoss">$0</span></li>
+            </ul>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-title">Active Markets (5M)</div>
+          <div class="panel-body">
+            <div class="positions-list" id="activeMarkets"></div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-title">Open Positions</div>
+          <div class="panel-body">
+            <div class="positions-list" id="openPositions"></div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-title">Trade Execution Log</div>
+          <div class="panel-body">
+            <div class="trades-list" id="tradeLog"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script>
+      const $ = (id) => document.getElementById(id);
+
+      async function get(url) { const r = await fetch(url); return r.json(); }
+      async function post(url) {
+        const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' } });
+        return r.json();
+      }
+
+      function fmtTs(ms) {
+        const d = new Date(ms);
+        const h = d.getHours().toString().padStart(2,'0');
+        const m = d.getMinutes().toString().padStart(2,'0');
+        const s = d.getSeconds().toString().padStart(2,'0');
+        const ms3 = (d.getMilliseconds()/10|0).toString().padStart(2,'0');
+        return `${h}:${m}:${s}.${ms3}`;
+      }
+
+      let currentTier = 't5';
+      let balanceChart, pnlChart;
+
+      document.querySelectorAll('.tier-tabs button').forEach(btn => {
+        btn.onclick = () => {
+          currentTier = btn.dataset.tier;
+          document.querySelectorAll('.tier-tabs button').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          refresh();
+        };
+      });
+
+      $('start').onclick = async () => { await post('/api/bot/start'); refresh(); };
+      $('stop').onclick = async () => { await post('/api/bot/stop'); refresh(); };
+
+      $('lookupMarket').onclick = async () => {
+        const slug = $('slugInput').value.trim();
+        if (!slug) return;
+        const el = $('gammaResult');
+        el.innerHTML = '<span style="color:var(--text-muted)">Loading...</span>';
+        try {
+          const r = await fetch('/api/gamma/market/' + encodeURIComponent(slug));
+          const m = r.ok ? await r.json() : null;
+          if (!m) throw new Error((await r.json().catch(() => ({}))).error || 'Not found');
+          el.innerHTML = `<div class="gamma-result"><strong>${m.question || slug}</strong><br>Condition: ${m.conditionId}<br>Tokens: ${(m.tokenIds || []).join(', ')}</div>`;
+        } catch (e) {
+          el.innerHTML = `<div class="gamma-result error">${e.message || String(e)}</div>`;
+        }
+      };
+
+      $('lookupEvent').onclick = async () => {
+        const slug = $('slugInput').value.trim();
+        if (!slug) return;
+        const el = $('gammaResult');
+        el.innerHTML = '<span style="color:var(--text-muted)">Loading...</span>';
+        try {
+          const r = await fetch('/api/gamma/event/' + encodeURIComponent(slug));
+          const ev = r.ok ? await r.json() : null;
+          if (!ev) throw new Error((await r.json().catch(() => ({}))).error || 'Not found');
+          el.innerHTML = `<div class="gamma-result"><strong>${ev.title || ev.question || slug}</strong><br>Condition: ${ev.conditionId}<br>Tokens: ${(ev.tokenIds || []).join(', ')}</div>`;
+        } catch (e) {
+          el.innerHTML = `<div class="gamma-result error">${e.message || String(e)}</div>`;
+        }
+      };
+
+      const chartColors = {
+        grid: 'rgba(255,255,255,0.06)',
+        neon: '#00ff88',
+        danger: '#ff4444'
+      };
+
+      async function refresh() {
+        const s = await get('/api/status');
+        $('mode').textContent = s.mode;
+        $('ws').textContent = s.ws.connected ? 'connected' : 'disconnected';
+        $('ws').style.color = s.ws.connected ? chartColors.neon : chartColors.danger;
+
+        const badge = $('statusBadge');
+        if (s.ws.connected) {
+          badge.className = 'status-badge';
+          badge.innerHTML = '<span class="status-dot"></span><span>SYSTEM ONLINE</span>';
+        } else {
+          badge.className = 'status-badge status-offline';
+          badge.innerHTML = '<span class="status-dot"></span><span>OFFLINE</span>';
+        }
+
+        const b = await get('/api/build');
+        $('buildInfo').textContent = `v${b.version} · ${new Date(b.startedAtIso).toLocaleTimeString()}`;
+
+        const btc = await get('/api/btc5m/state');
+        const idx = btc?.index?.price;
+        const start = btc?.startPrice;
+        if (idx != null && start != null) {
+          const pct = ((Number(idx) - Number(start)) / Number(start) * 100).toFixed(2);
+          $('btcPrice').textContent = `PRIOR $${Number(start).toFixed(0)} → POST $${Number(idx).toFixed(0)} (${Number(pct) >= 0 ? '+' : ''}${pct}%)`;
+          $('btcPrice').style.color = Number(pct) >= 0 ? chartColors.neon : chartColors.danger;
+        } else {
+          $('btcPrice').textContent = 'BTC —';
+          $('btcPrice').style.color = '';
+        }
+
+        const dash = await get('/api/dashboard?tier=' + currentTier);
+        const bal = Number(dash.balance ?? 0);
+        const pnl = Number(dash.totalPnl ?? 0);
+        const roi = Number(dash.roi ?? 0);
+
+        $('kpiBalance').textContent = '$' + bal.toFixed(2);
+        $('kpiStart').textContent = '$' + Number(dash.startBalance ?? 0).toFixed(0);
+        $('kpiPnl').textContent = (pnl >= 0 ? '+' : '') + '$' + pnl.toFixed(2);
+        $('kpiPnl').className = 'kpi-value' + (pnl < 0 ? ' negative' : '');
+        $('kpiRoi').textContent = (roi >= 0 ? '+' : '') + roi.toFixed(2) + '%';
+        $('kpiRoi').style.color = roi >= 0 ? chartColors.neon : chartColors.danger;
+        $('kpiRoiVal').textContent = (roi >= 0 ? '+' : '') + roi.toFixed(2) + '%';
+        $('kpiRoiVal').className = 'kpi-value' + (roi < 0 ? ' negative' : '');
+        $('kpiWinRate').textContent = dash.winRate != null ? dash.winRate.toFixed(1) + '%' : '—';
+        $('kpiWl').textContent = `${dash.wins ?? 0}W / ${dash.losses ?? 0}L`;
+
+        $('tradeCount').textContent = dash.totalTrades ?? 0;
+        $('chartBalance').textContent = '$' + bal.toFixed(2);
+        $('pnlSummary').textContent = `${dash.wins ?? 0}W / ${dash.losses ?? 0}L | Avg: $${(dash.avgPnlPerTrade ?? 0).toFixed(2)}`;
+
+        $('mTotalTrades').textContent = dash.totalTrades ?? 0;
+        $('mClosed').textContent = dash.closedPositions ?? 0;
+        $('mWl').textContent = `${dash.wins ?? 0} / ${dash.losses ?? 0}`;
+        $('mAvgWin').textContent = '+$' + (dash.avgWin ?? 0).toFixed(2);
+        $('mAvgLoss').textContent = '-$' + Math.abs(dash.avgLoss ?? 0).toFixed(2);
+        $('mLargestWin').textContent = '+$' + (dash.largestWin ?? 0).toFixed(2);
+        $('mLargestLoss').textContent = '-$' + Math.abs(dash.largestLoss ?? 0).toFixed(2);
+
+        const eq = await get('/api/paper/equity?tier=' + currentTier);
+        const labels = (eq.items || []).map(p => new Date(p.tsMs).toLocaleTimeString());
+        const vals = (eq.items || []).map(p => (p.bankrollUsd || 0) + (p.unrealizedPnlUsd || 0));
+
+        if (!balanceChart) {
+          balanceChart = new Chart($('balanceChart'), {
+            type: 'line',
+            data: { labels, datasets: [{ label: 'Balance', data: vals, borderColor: chartColors.neon, backgroundColor: 'rgba(0,255,136,0.08)', fill: true, tension: 0.25, pointRadius: 0 }] },
+            options: {
+              responsive: true, maintainAspectRatio: false,
+              plugins: { legend: { display: false } },
+              scales: { x: { display: false }, y: { grid: { color: chartColors.grid }, ticks: { color: '#6b6b78' } } }
+            }
+          });
+        } else {
+          balanceChart.data.labels = labels;
+          balanceChart.data.datasets[0].data = vals;
+          balanceChart.update('none');
+        }
+
+        const pnlDist = dash.pnlDistribution || [];
+        if (!pnlChart) {
+          pnlChart = new Chart($('pnlChart'), {
+            type: 'bar',
+            data: {
+              labels: pnlDist.map((_, i) => i + 1),
+              datasets: [{
+                label: 'PNL',
+                data: pnlDist,
+                backgroundColor: pnlDist.map(v => v >= 0 ? 'rgba(0,255,136,0.7)' : 'rgba(255,68,68,0.7)'),
+                borderColor: pnlDist.map(v => v >= 0 ? chartColors.neon : chartColors.danger),
+                borderWidth: 1
+              }]
+            },
+            options: {
+              responsive: true, maintainAspectRatio: false,
+              plugins: { legend: { display: false } },
+              scales: {
+                x: { display: pnlDist.length <= 40, grid: { color: chartColors.grid }, ticks: { color: '#6b6b78', maxTicksLimit: 20 } },
+                y: { grid: { color: chartColors.grid }, ticks: { color: '#6b6b78' } }
+              }
+            }
+          });
+        } else {
+          pnlChart.data.labels = pnlDist.map((_, i) => i + 1);
+          pnlChart.data.datasets[0].data = pnlDist;
+          pnlChart.data.datasets[0].backgroundColor = pnlDist.map(v => v >= 0 ? 'rgba(0,255,136,0.7)' : 'rgba(255,68,68,0.7)');
+          pnlChart.data.datasets[0].borderColor = pnlDist.map(v => v >= 0 ? chartColors.neon : chartColors.danger);
+          pnlChart.update('none');
+        }
+
+        const markets = await get('/api/dashboard/active-markets');
+        $('activeMarkets').innerHTML = (markets.items || []).length
+          ? (markets.items || []).slice(0, 10).map(m =>
+              `<div class="item"><span>${(m.question || m.conditionId || '').slice(0, 45)}</span></div>`
+            ).join('')
+          : '<div class="item" style="color:var(--text-muted)">No active markets (start bot)</div>';
+
+        const ppos = await get('/api/paper/positions?tier=' + currentTier);
+        const open = (ppos.items || []).filter(p => p.status === 'open');
+        $('openPositions').innerHTML = open.length ? open.slice(0, 20).map(p =>
+          `<div class="item"><span>${(p.outcomeLabel || '').slice(0, 8)}</span><span>${(p.question || '').slice(0, 30)}…</span></div>`
+        ).join('') : '<div class="item" style="color:var(--text-muted)">No open positions</div>';
+
+        const trades = await get('/api/dashboard/trades?tier=' + currentTier);
+        $('tradeLog').innerHTML = (trades.items || []).slice(0, 30).map(t => {
+          const pnl = t.pnl != null ? (t.pnl >= 0 ? '+' : '') + '$' + t.pnl.toFixed(2) : '';
+          const pnlCl = t.pnl != null ? (t.pnl >= 0 ? 'pos' : 'neg') : '';
+          return `<div class="item">
+            <span>${fmtTs(t.tsMs)}</span>
+            <span class="action">${t.action}</span>
+            <span>${t.outcome} @ ${t.price?.toFixed(2) ?? ''}</span>
+            <span>($${t.sizeUsd?.toFixed(1) ?? ''})</span>
+            ${pnl ? `<span class="pnl ${pnlCl}">PNL: ${pnl}</span>` : ''}
+          </div>`;
+        }).join('') || '<div class="item" style="color:var(--text-muted)">No trades yet</div>';
+      }
+
+      refresh();
+      setInterval(refresh, 1500);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,51 @@
+{
+  "mode": "dry-run",
+  "ui": {
+    "port": 3188,
+    "bind": "127.0.0.1"
+  },
+  "feeds": {
+    "clobWsUrl": "wss://ws-subscriptions-clob.polymarket.com/ws/market",
+    "clobUserWsUrl": "wss://ws-subscriptions-clob.polymarket.com/ws/user",
+    "gammaBaseUrl": "https://gamma-api.polymarket.com"
+  },
+  "paper": {
+    "bankrollUsd": 85
+  },
+  "autostart": true,
+  "limits": {
+    "maxUsdcPerTrade": 1,
+    "maxOpenOrders": 2,
+    "cooldownMs": 15000
+  },
+  "strategy": {
+    "kind": "btc5m",
+    "enabled": true,
+    "casinoNo": {
+      "minNoPrice": 0.97,
+      "maxHoursToClose": 168,
+      "maxConcurrentPositions": 10
+    },
+    "enabledStrategies": {
+      "casinoNo": false,
+      "btc5m": true
+    },
+    "btc5m": {
+      "enabled": true,
+      "autoFollow": true,
+      "seriesId": 10684,
+      "eventSlug": "btc-updown-5m-1771297500",
+      "minLagPct": 0.0015,
+      "indexSource": "coinbase",
+      "maxEntryPrice": 0.65,
+      "minModelEdge": 0.02
+    },
+    "watch": {
+      "marketIds": [],
+      "autoTopN": 0
+    }
+  },
+  "storage": {
+    "dir": "./data"
+  }
+}

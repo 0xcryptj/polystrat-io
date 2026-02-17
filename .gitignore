@@ -1,0 +1,13 @@
+node_modules
+.dist
+/dist
+
+# data is local state/logs; keep structure but not content
+/data/*.json
+/data/*.jsonl
+/data/archive/
+/data/backtests/
+/data/logs/
+
+# secrets
+.env
